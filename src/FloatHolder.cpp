@@ -2,12 +2,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-FloatHolder::FloatHolder(int n) : nElements(n)
+FloatHolder::FloatHolder(int nx, int ny/*=1*/, int nz/*=1*/) : 
+    nElements(nx, ny, nz)
+    , totalElements(nx*ny*nz)
     , rawPtrCPU(0)
     , rawPtrGPU(0)
 {
-  rawPtrCPU = new float[nElements];
-  cudaMalloc(&rawPtrGPU, nElements*sizeof(float)); 
+  rawPtrCPU = new float[totalElements];
+  cudaMalloc(&rawPtrGPU, totalElements*sizeof(float)); 
 }
 
 FloatHolder::~FloatHolder()
@@ -20,7 +22,7 @@ void FloatHolder::copyCPUtoGPU()
 {
   cudaMemcpy(rawPtrGPU
       , rawPtrCPU
-      , nElements*sizeof(float)
+      , totalElements*sizeof(float)
       , cudaMemcpyHostToDevice);
 }
 
@@ -28,6 +30,6 @@ void FloatHolder::copyGPUtoCPU()
 {
   cudaMemcpy(rawPtrCPU
       , rawPtrGPU
-      , nElements*sizeof(float)
+      , totalElements*sizeof(float)
       , cudaMemcpyDeviceToHost);
 }    

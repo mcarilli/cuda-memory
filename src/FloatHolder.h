@@ -1,21 +1,26 @@
 #pragma once
 #include <cstdlib>
 #include <stdio.h>
+#include <cuda_runtime.h>
 
 class KernelLauncher;
 
 class FloatHolder
 {
-  int nElements;
+  dim3 nElements;
+  int totalElements;
   float *rawPtrCPU, *rawPtrGPU;
 
   public:
-  FloatHolder(int n);
+  FloatHolder(int nx, int ny=1, int nz=1);
   ~FloatHolder();
   void copyCPUtoGPU();
   void copyGPUtoCPU();
   float* getrawPtrCPU(){ return rawPtrCPU; }
   float& operator[](int indx){ return rawPtrCPU[indx]; }
-  
+  float nx() { return nElements.x; }
+  float ny() { return nElements.y; }
+  float nz() { return nElements.z; }
+ 
   friend class KernelLauncher;
 };
