@@ -18,6 +18,10 @@ class FloatHolder
   void copyGPUtoCPU();
   float* getrawPtrCPU(){ return rawPtrCPU; }
   float& operator[](int indx){ return rawPtrCPU[indx]; }
+  float& operator()(int z, int y, int x)
+  { 
+    return rawPtrCPU[nElements.x*nElements.y*z + nElements.x*y + x]; 
+  }
   float nx() { return nElements.x; }
   float ny() { return nElements.y; }
   float nz() { return nElements.z; }

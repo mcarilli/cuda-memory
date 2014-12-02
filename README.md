@@ -1,4 +1,4 @@
 cuda-memory
 ===========
 
-Playing around with the GPU cache hierarchy
+Playing around with GPU memory optimization

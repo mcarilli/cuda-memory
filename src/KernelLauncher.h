@@ -14,6 +14,7 @@ class KernelLauncher
   cudaEvent_t start, stop;
   public:
   static KernelLauncher& instance() { return kl; }
+  void copy(FloatHolder& fhin, FloatHolder& fhout);
   void saxpy(FloatHolder& fhx, FloatHolder& fhy, float a);
   void transposeNaive(FloatHolder& fhin, FloatHolder& fhout);
   void transposeFast(FloatHolder& fhin, FloatHolder& fhout);
