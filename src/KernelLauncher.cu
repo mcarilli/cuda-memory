@@ -195,7 +195,7 @@ void KernelLauncher::transposeFast(FloatHolder& fhin, FloatHolder& fhout)
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranposeFast: %f\n", ms);
+  printf("Elapsed time in tranposeFast: %f ms\n", ms);
   printf("Effective throughput of transposeFast: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
@@ -213,7 +213,7 @@ void KernelLauncher::transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout)
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranpose32PerThread: %f\n", ms);
+  printf("Elapsed time in tranpose32PerThread: %f ms\n", ms);
   printf("Effective throughput of transpose32PerThread: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
@@ -255,7 +255,7 @@ void KernelLauncher::matxmatNaive(FloatHolder& fha
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in matxmatNaive: %f\n", ms);
+  printf("Elapsed time in matxmatNaive: %f ms\n", ms);
   printf("Effective throughput of matxmatNaive: %f GB/s\n"
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
@@ -276,7 +276,7 @@ void KernelLauncher::matxmatFast(FloatHolder& fha
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in matxmatFast: %f\n", ms);
+  printf("Elapsed time in matxmatFast: %f ms \n", ms);
   printf("Effective throughput of matxmatFast: %f GB/s\n"
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
