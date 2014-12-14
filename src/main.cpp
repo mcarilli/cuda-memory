@@ -25,7 +25,9 @@ int main()
   void runTestSaxpy();
   void runTestTransposeNaive();
   void runTestTransposeFast();
+  void runTestTransposeFastNoBankConf();
   void runTestMatxmatNaive();
+  void runTestReduceY();
 
   cout << fixed << setprecision(2);
   cout << endl;
@@ -36,6 +38,10 @@ int main()
   runTestTransposeNaive();
   cout << endl;
   runTestTransposeFast();
+  cout << endl;
+  runTestTransposeFastNoBankConf();
+  cout << endl;
+  runTestReduceY();
   cout << endl;
   runTestMatxmatNaive();
   cout << endl;
@@ -74,14 +80,11 @@ void runTestCopy()
   
   try
   {
-    bool error = false;
     for (int i=0; i<fhin.nz(); i++)
       for (int j=0; j<fhin.ny(); j++)
         for (int k=0; k<fhin.nx(); k++)
-        {
           if(fhin(i,j,k) != fhout(i,j,k))
             throw Error3d(i,j,k);
-        }
   }
   catch(Error3d& error)
   {
@@ -127,14 +130,11 @@ void runTestSaxpy()
   
   try
   {
-    bool error = false;
     for (int i=0; i<fhy.nz(); i++)
       for (int j=0; j<fhy.ny(); j++)
         for (int k=0; k<fhy.nx(); k++)
-        {
           if(fhy(i,j,k) != 4.0)
             throw Error3d(i,j,k);
-        }
   }
   catch(Error3d& error)
   {
@@ -178,14 +178,11 @@ void runTestTransposeNaive()
   
   try
   {
-    bool error = false;
     for (int i=0; i<fhin.nz(); i++)
       for (int j=0; j<fhin.ny(); j++)
         for (int k=0; k<fhin.nx(); k++)
-        {
           if(fhin(i,j,k) != fhout(i,k,j))
             throw Error3d(i,j,k);
-        }
   }
   catch(Error3d& error)
   {
@@ -229,19 +226,64 @@ void runTestTransposeFast()
   
   try 
   {
-    bool error = false; 
     for (int i=0; i<fhin.nz(); i++)
       for (int j=0; j<fhin.ny(); j++)
 	for (int k=0; k<fhin.nx(); k++)
-	{
           if(fhin(i,j,k) != fhout(i,k,j)) 
             throw Error3d(i,j,k);
-	}
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "transposeFast failed!" << endl;
+    cout << "fhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhin(i,j,k) << std::endl;
+    cout << "fhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << fhout(i,k,j) << std::endl;
+  }
+}
+
+void runTestTransposeFastNoBankConf() 
+{  
+  cout << "Testing transposeFastNoBankConf" << std::endl;
+
+  int Nx = MATDIMX;
+  int Ny = MATDIMY;
+  float a = 2.0;
+  FloatHolder fhin(Nx,Ny);
+  FloatHolder fhout(Ny,Nx);
+  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+
+  {
+    int indx = 0;
+    for (int i=0; i<fhin.nz(); i++)
+      for (int j=0; j<fhin.ny(); j++)
+	for (int k=0; k<fhin.nx(); k++)
+	{
+	  fhin(i,j,k) = indx;
+	  fhout(i,k,j) = 0;
+	  indx++;
+	}
+  }
+
+  fhin.copyCPUtoGPU();
+
+  kernelLauncher.transposeFastNoBankConf(fhin, fhout);
+
+  fhout.copyGPUtoCPU();
+  
+  try 
+  {
+    for (int i=0; i<fhin.nz(); i++)
+      for (int j=0; j<fhin.ny(); j++)
+	for (int k=0; k<fhin.nx(); k++)
+          if(fhin(i,j,k) != fhout(i,k,j)) 
+            throw Error3d(i,j,k);
+  }
+  catch(Error3d& error)
+  {
+    int i(error.i), j(error.j), k(error.k);
+    cout << "transposeFastNoBankConf failed!" << endl;
     cout << "fhin ("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << fhin(i,j,k) << std::endl;
     cout << "fhout("<< i << "," << k << "," << j << "):  "
@@ -283,7 +325,6 @@ void runTestMatxmatNaive()
   
   try 
   {
-    bool error = false; 
     for (int i=0; i<fha.nz(); i++)
       for (int j=0; j<fha.ny(); j++)
 	for (int k=0; k<fha.nx(); k++)
@@ -300,5 +341,58 @@ void runTestMatxmatNaive()
 	<< setw(10) << fhout(i,j,k) << std::endl;
     cout << "fhout("<< i << "," << k << "," << j << "):  "
 	<< setw(10) << fhout(i,k,j) << std::endl;
+  }
+}
+
+
+void runTestReduceY()
+{  
+  cout << "Testing reduceY" << std::endl;
+
+  int Nx = MATDIMX;
+  int Ny = MATDIMY;
+  float a = 2.0;
+  FloatHolder fhin(Nx,Ny);
+  FloatHolder fhout(Nx,Ny);
+  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+
+  {
+    int indx = 0;
+    for (int i=0; i<fhin.nz(); i++)
+      for (int j=0; j<fhin.ny(); j++)
+	for (int k=0; k<fhin.nx(); k++)
+	{
+	  fhin(i,j,k) = 1;  // Warning:  try big numbers here and you will
+	  fhout(i,j,k) = 0; // exceed floating-point precision!
+	  indx++;
+	}
+  }
+
+  fhin.copyCPUtoGPU();
+
+  kernelLauncher.reduceY(fhin, fhout);
+
+  fhout.copyGPUtoCPU();
+
+  for (int i=0; i<fhin.nz(); i++)
+    for (int k=0; k<fhin.nx(); k++)
+      for (int j=1; j<fhin.ny(); j++)
+	  fhin(i,0,k) += fhin(i,j,k);
+
+  try 
+  {
+    for (int i=0; i<fhin.nz(); i++)
+      for (int k=0; k<fhin.nx(); k++)
+	if (fhin(i,0,k) != fhout(i,0,k))
+	  throw Error3d(i,0,k); 
+  }
+  catch(Error3d& error)
+  {
+    int i(error.i), j(error.j), k(error.k);
+    cout << "reduceY failed!" << endl;
+    cout << "fhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhin(i,j,k) << std::endl;
+    cout << "fhout("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhout(i,j,k) << std::endl;
   }
 }

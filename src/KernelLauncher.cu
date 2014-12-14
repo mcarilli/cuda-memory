@@ -103,6 +103,38 @@ void transposeFastKernel(int nx_in
 }
 
 __global__
+void transposeFastNoBankConfKernel(int nx_in
+    , int ny_in
+    , float* in
+    , float* out)
+{
+  __shared__ float staging_in[BLOCKDIMY+1][BLOCKDIMX];
+  __shared__ float staging_out[BLOCKDIMX+1][BLOCKDIMY];
+  // For matrix | A B | with submatrices A, B, C, D, 
+  //            | C D |
+  // | A B |   = | A_T C_T |
+  // | C D |_T   | B_T D_T |  
+  // Reads to in_staging are coalesced.
+  // Data is transposed within in_staging then written back
+  // out to appropriate 32x32 block of out.
+  int globalxoffset_in = blockIdx.x*blockDim.x;
+  int globalyoffset_in = blockIdx.y*blockDim.y;
+  int globalxindx_in = globalxoffset_in + threadIdx.x;
+  int globalyindx_in = globalyoffset_in + threadIdx.y;
+  if (globalxindx_in < nx_in && globalyindx_in < ny_in)
+    staging_in[threadIdx.y][threadIdx.x] = in[nx_in*globalyindx_in+globalxindx_in];
+  __syncthreads();
+  if (globalxindx_in < nx_in && globalyindx_in < ny_in)
+  {
+    staging_out[threadIdx.x][threadIdx.y] = staging_in[threadIdx.y][threadIdx.x];
+  }
+  __syncthreads();
+  if (globalxindx_in < nx_in && globalyindx_in < ny_in)
+    out[ny_in*(globalxoffset_in+threadIdx.y)+globalyoffset_in+threadIdx.x] =
+        staging_out[threadIdx.y][threadIdx.x];
+}
+
+__global__
 void matxmatNaiveKernel(int nx
       , int ny
       , float* a
@@ -114,8 +146,33 @@ void matxmatNaiveKernel(int nx
   int i = nx*globalyindx+globalxindx;
   float sum = 0;
   for (int x=0; x<nx; x++)
-    sum += a[nx*globalyindx+x]*b[ny*x+globalxindx];
-  out[i] = sum;
+    if (globalxindx < nx && globalyindx < ny)
+      sum += a[nx*globalyindx+x]*b[ny*x+globalxindx];
+  if (globalxindx < nx && globalyindx < ny)
+    out[i] = sum;
+}
+
+__global__ 
+void reduceBy2YKernel(int nx
+    , int ny
+    , int yStride
+    , float* inout)
+{
+  // Reduce like this
+  //  a b  ->  a+c b+d  // a+c was produced by thread 1, b+d by thread 2, etc 
+  //  c d      garbage  // Memory accesses are x-contiguous for good choice of blockDim.x
+  //  e f      e+g f+h
+  //  g h      garbage
+  
+  int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
+  int globalyindx = 2*yStride*(blockIdx.y*blockDim.y + threadIdx.y);
+
+  float sum=0;
+  for (int y=0; y<2; y++)
+    if (globalxindx < nx && (globalyindx+y) < ny)
+      sum += inout[nx*(globalyindx+y*yStride)+globalxindx];
+  if (globalxindx < nx && globalyindx < ny)
+    inout[nx*globalyindx+globalxindx] = sum;
 }
 
 
@@ -200,6 +257,28 @@ void KernelLauncher::transposeFast(FloatHolder& fhin, FloatHolder& fhout)
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
+void KernelLauncher::transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fhout)
+{
+  if (BLOCKDIMX != BLOCKDIMY)
+    printf("Warning:  transposeFastNoBankConf will fail if BLOCKDIMX (%d) != BLOCKDIMY (%d)"
+        , BLOCKDIMX
+        , BLOCKDIMY);
+  cudaEventRecord(start);
+  transposeFastNoBankConfKernel
+      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+      (fhin.nx()
+      , fhin.ny()
+      , fhin.rawPtrGPU
+      , fhout.rawPtrGPU);
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  float ms = 0;
+  cudaEventElapsedTime(&ms, start, stop);
+  printf("Elapsed time in tranposeFastNoBankConf: %f ms\n", ms);
+  printf("Effective throughput of transposeFastNoBankConf: %f GB/s\n"
+      , fhin.totalElements*sizeof(float)/ms/1e6);
+}
+
 void KernelLauncher::transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout)
 {
   cudaEventRecord(start);
@@ -281,3 +360,43 @@ void KernelLauncher::matxmatFast(FloatHolder& fha
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
 
+void KernelLauncher::reduceY(FloatHolder& fhin
+    , FloatHolder& fhout)
+{
+  copyKernel
+      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+      // <<<dim3(1,(fhin.totalElements+BLOCKDIM-1)/BLOCKDIM),dim3(BLOCKDIM,1)>>>
+      (fhin.nx()
+      , fhin.ny()
+      , fhin.rawPtrGPU
+      , fhout.rawPtrGPU);
+  cudaEventRecord(start);
+  {
+    int yStride = 1;
+    int pass = 0;
+    int nyRemaining = fhout.ny();
+    while (nyRemaining >= 2)
+    {
+      // std::cout << "pass:  " << pass << std::endl;
+      // std::cout << "yStride:  " << yStride << std::endl;
+      // std::cout << "nyRemaining:  " << nyRemaining << std::endl;
+      // std::cout << "Launching with: " << (nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY) << " blocks in Y direction " << std::endl;
+      reduceBy2YKernel
+	  <<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY)), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	  (fhout.nx()
+	   , fhout.ny()
+           , yStride
+	   , fhout.rawPtrGPU);
+      pass++;
+      yStride *= 2; 
+      nyRemaining /= 2;
+    }
+  }
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  float ms = 0;
+  cudaEventElapsedTime(&ms, start, stop);
+  printf("Elapsed time in reduceBy2YKernel: %f ms\n", ms);
+  printf("Effective throughput of reduceBy2YKernel: %f GB/s\n"
+      , fhin.totalElements*sizeof(float)/ms/1e6);
+}
