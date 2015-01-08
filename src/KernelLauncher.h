@@ -20,8 +20,7 @@ class KernelLauncher
   void transposeFast(FloatHolder& fhin, FloatHolder& fhout);
   void transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fhout);
   void transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout);
-  void matxvec(FloatHolder& fha, FloatHolder& fhv, FloatHolder& fhout);
   void matxmatNaive(FloatHolder& fha, FloatHolder& fhb, FloatHolder& fhout);
-  void matxmatFast(FloatHolder& fha, FloatHolder& fhb, FloatHolder& fhbtranspose, FloatHolder& fhout);
+  void matxmatTiles(FloatHolder& fha, FloatHolder& fhb, FloatHolder& fhout);
   void reduceY(FloatHolder& fhin, FloatHolder& fhout);
 };

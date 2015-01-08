@@ -27,6 +27,7 @@ int main()
   void runTestTransposeFast();
   void runTestTransposeFastNoBankConf();
   void runTestMatxmatNaive();
+  void runTestMatxmatTiles();
   void runTestReduceY();
 
   cout << fixed << setprecision(2);
@@ -41,9 +42,11 @@ int main()
   cout << endl;
   runTestTransposeFastNoBankConf();
   cout << endl;
-  runTestReduceY();
-  cout << endl;
   runTestMatxmatNaive();
+  cout << endl;
+  runTestMatxmatTiles();
+  cout << endl;
+  runTestReduceY();
   cout << endl;
 
   return 0;
@@ -344,6 +347,58 @@ void runTestMatxmatNaive()
   }
 }
 
+void runTestMatxmatTiles()
+{  
+  cout << "Testing matxmatTiles" << std::endl;
+
+  int Nx = MATDIMX;
+  int Ny = MATDIMY;
+  float a = 2.0;
+  FloatHolder fha(Nx,Ny);
+  FloatHolder fhb(Ny,Nx);
+  FloatHolder fhout(Nx,Ny);
+  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+
+  {
+    int indx = 0;
+    for (int i=0; i<fha.nz(); i++)
+      for (int j=0; j<fha.ny(); j++)
+	for (int k=0; k<fha.nx(); k++)
+	{
+	  fha(i,j,k) = 1;
+          fhb(i,k,j) = 1;
+	  fhout(i,k,j) = 0;
+	  indx++;
+	}
+  }
+
+  fha.copyCPUtoGPU();
+  fhb.copyCPUtoGPU();
+
+  kernelLauncher.matxmatTiles(fha, fhb, fhout);
+
+  fhout.copyGPUtoCPU();
+  
+  try 
+  {
+    for (int i=0; i<fha.nz(); i++)
+      for (int j=0; j<fha.ny(); j++)
+	for (int k=0; k<fhb.nx(); k++)
+	{
+          if(fhout(i,j,k) != MATDIMX) 
+            throw Error3d(i,j,k);
+	}
+  }
+  catch(Error3d& error)
+  {
+    int i(error.i), j(error.j), k(error.k);
+    cout << "transposeFast failed!" << endl;
+    cout << "fhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhout(i,j,k) << std::endl;
+    cout << "fhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << fhout(i,k,j) << std::endl;
+  }
+}
 
 void runTestReduceY()
 {  
@@ -396,3 +451,5 @@ void runTestReduceY()
 	<< setw(10) << fhout(i,j,k) << std::endl;
   }
 }
+
+

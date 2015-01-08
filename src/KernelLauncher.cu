@@ -152,29 +152,50 @@ void matxmatNaiveKernel(int nx
     out[i] = sum;
 }
 
+__global__
+void matxmatTilesKernel(int nx
+      , int ny
+      , float* a
+      , float* b
+      , float* out)
+{
+  int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
+  int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
+  int i = nx*globalyindx+globalxindx;
+  float sum = 0;
+  for (int x=0; x<nx; x++)
+    if (globalxindx < nx && globalyindx < ny)
+      sum += a[nx*globalyindx+x]*b[ny*x+globalxindx];
+  if (globalxindx < nx && globalyindx < ny)
+    out[i] = sum;
+}
+
 __global__ 
-void reduceBy2YKernel(int nx
+void reduceYBy2Kernel(int nx
     , int ny
     , int yStride
     , float* inout)
 {
   // Reduce like this
   //  a b  ->  a+c b+d  // a+c was produced by thread 1, b+d by thread 2, etc 
-  //  c d      garbage  // Memory accesses are x-contiguous for good choice of blockDim.x
+  //  c d      garbage  
   //  e f      e+g f+h
   //  g h      garbage
-  
+  // Memory accesses are x-contiguous => coalesced 
+  // for good choice of blockDim.x
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = 2*yStride*(blockIdx.y*blockDim.y + threadIdx.y);
 
-  float sum=0;
-  for (int y=0; y<2; y++)
-    if (globalxindx < nx && (globalyindx+y) < ny)
-      sum += inout[nx*(globalyindx+y*yStride)+globalxindx];
-  if (globalxindx < nx && globalyindx < ny)
-    inout[nx*globalyindx+globalxindx] = sum;
-}
+  float sum = 0;
 
+  if (globalxindx < nx && globalyindx < ny)
+  {
+    sum += inout[nx*globalyindx+globalxindx];
+    if ((globalyindx+yStride) < ny)
+      sum += inout[nx*(globalyindx+yStride)+globalxindx];
+    inout[nx*globalyindx+globalxindx] = sum;
+  }
+}
 
 void KernelLauncher::copy(FloatHolder& fhin, FloatHolder& fhout)
 {
@@ -297,27 +318,6 @@ void KernelLauncher::transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout)
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
-void KernelLauncher::matxvec(FloatHolder& fha
-    , FloatHolder& fhv
-    , FloatHolder& fhout)
-{/*
-  cudaEventRecord(start);
-  matxvecDirectProdKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fha.nx()
-      , fha.ny()
-      , fha.rawPtrGPU
-      , fhv.rawPtrGPU
-      , fhout.rawPtrGPU);
-  cudaEventRecord(stop);
-  cudaEventSynchronize(stop);
-  float ms = 0;
-  cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranposeFast: %f\n", ms);
-  printf("Effective throughput of transposeFast: %f GB/s\n"
-      , fhin.totalElements*sizeof(float)/ms/1e6);*/
-}
-
 void KernelLauncher::matxmatNaive(FloatHolder& fha
     , FloatHolder& fhb
     , FloatHolder& fhout)
@@ -339,24 +339,24 @@ void KernelLauncher::matxmatNaive(FloatHolder& fha
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
 
-void KernelLauncher::matxmatFast(FloatHolder& fha
+void KernelLauncher::matxmatTiles(FloatHolder& fha
     , FloatHolder& fhb
-    , FloatHolder& fhbtranspose
     , FloatHolder& fhout)
 {
   cudaEventRecord(start);
-  transposeFastKernel
+  matxmatTilesKernel
       <<<dim3((fha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fhb.nx()
-      , fhb.ny()
+      (fha.nx()
+      , fha.ny()
+      , fha.rawPtrGPU
       , fhb.rawPtrGPU
-      , fhbtranspose.rawPtrGPU);
+      , fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in matxmatFast: %f ms \n", ms);
-  printf("Effective throughput of matxmatFast: %f GB/s\n"
+  printf("Elapsed time in matxmatTiles: %f ms \n", ms);
+  printf("Effective throughput of matxmatTiles: %f GB/s\n"
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -381,7 +381,7 @@ void KernelLauncher::reduceY(FloatHolder& fhin
       // std::cout << "yStride:  " << yStride << std::endl;
       // std::cout << "nyRemaining:  " << nyRemaining << std::endl;
       // std::cout << "Launching with: " << (nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY) << " blocks in Y direction " << std::endl;
-      reduceBy2YKernel
+      reduceYBy2Kernel
 	  <<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY)), dim3(BLOCKDIMX,BLOCKDIMY)>>>
 	  (fhout.nx()
 	   , fhout.ny()
@@ -396,7 +396,7 @@ void KernelLauncher::reduceY(FloatHolder& fhin
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in reduceBy2YKernel: %f ms\n", ms);
-  printf("Effective throughput of reduceBy2YKernel: %f GB/s\n"
+  printf("Elapsed time in reduceYBy2Kernel: %f ms\n", ms);
+  printf("Effective throughput of reduceYBy2Kernel: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
