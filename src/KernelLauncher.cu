@@ -12,6 +12,7 @@
 #define BLOCKDIMX 32
 #define BLOCKDIMY 32
  
+#define NREPS 10
 
 KernelLauncher KernelLauncher::kl;
 
@@ -26,6 +27,8 @@ KernelLauncher::~KernelLauncher()
   cudaEventDestroy(start);
   cudaEventDestroy(stop);
 }
+
+// Kernels
 
 __global__ 
 void copyKernel(int nx, int ny, float* in, float *out)
@@ -108,8 +111,8 @@ void transposeFastNoBankConfKernel(int nx_in
     , float* in
     , float* out)
 {
-  __shared__ float staging_in[BLOCKDIMY+1][BLOCKDIMX];
-  __shared__ float staging_out[BLOCKDIMX+1][BLOCKDIMY];
+  __shared__ float staging_in[BLOCKDIMY][BLOCKDIMX+1];
+  __shared__ float staging_out[BLOCKDIMX][BLOCKDIMY+1];
   // For matrix | A B | with submatrices A, B, C, D, 
   //            | C D |
   // | A B |   = | A_T C_T |
@@ -145,6 +148,7 @@ void matxmatNaiveKernel(int nx
   int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
   int i = nx*globalyindx+globalxindx;
   float sum = 0;
+  // #pragma unroll // Unrolling NOT useful here because nx not necessarily known at compile time
   for (int x=0; x<nx; x++)
     if (globalxindx < nx && globalyindx < ny)
       sum += a[nx*globalyindx+x]*b[ny*x+globalxindx];
@@ -159,15 +163,58 @@ void matxmatTilesKernel(int nx
       , float* b
       , float* out)
 {
+  // Square tiles in smem
+  __shared__ float tileA[BLOCKDIMX][BLOCKDIMX+1];
+  __shared__ float tileB[BLOCKDIMX][BLOCKDIMX+1];
+
+  float sumOut = 0; // Holds output for this thread
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
-  int i = nx*globalyindx+globalxindx;
-  float sum = 0;
-  for (int x=0; x<nx; x++)
-    if (globalxindx < nx && globalyindx < ny)
-      sum += a[nx*globalyindx+x]*b[ny*x+globalxindx];
-  if (globalxindx < nx && globalyindx < ny)
-    out[i] = sum;
+  int tileATopLeftxindx = 0;
+  int tileATopLeftyindx = 0;
+  int tileBTopLeftxindx = 0;
+  int tileBTopLeftyindx = 0;
+  bool inRange = (globalxindx < nx && globalyindx < ny);
+
+  for (int tileindx=0; tileindx<(nx+BLOCKDIMX-1)/BLOCKDIMX; tileindx++)
+  {
+    tileATopLeftxindx = tileindx*BLOCKDIMX;
+    tileATopLeftyindx = blockIdx.y*blockDim.y;
+    tileBTopLeftxindx = blockIdx.x*blockDim.x;
+    tileBTopLeftyindx = tileATopLeftxindx;
+
+    // Load square tiles into smem
+    if(inRange)
+    {
+      // Loads are coalesced for both tileA and tileB.
+      tileA[threadIdx.y][threadIdx.x] = a[ny*(tileATopLeftyindx+threadIdx.y)+tileATopLeftxindx+threadIdx.x]; 
+      tileB[threadIdx.y][threadIdx.x] = b[nx*(tileBTopLeftyindx+threadIdx.y)+tileBTopLeftxindx+threadIdx.x];
+    }
+
+    __syncthreads();
+
+    #pragma unroll // Unrolling could be useful here because BLOCKDIMX known at compile time
+    for (int x=0; x<BLOCKDIMX; x++)
+      if(inRange)
+	sumOut += tileA[threadIdx.y][x]*tileB[x][threadIdx.x];      
+
+    __syncthreads(); 
+
+   // if (nx*globalyindx+globalxindx == 0/*threadIdx.x == 0 && threadIdx.y == 0*/)
+   //   printf("blockIdx.x: %d, blockIdx.y: %d, tileindx: %d, tileA[0][1]: %f, tileB[0][1]: %f, \ntileOut[1][0]: %f, globalxindx: %d, globalyindx: %d, # of tileindxs: %d\n\n"
+   //       , blockIdx.x
+   //       , blockIdx.y
+   //       , tileindx
+   //       , tileA[0][1]
+   //       , tileB[0][1]
+   //       , tileOut[1][0]
+   //       , globalxindx
+   //       , globalyindx
+   //       , (nx+BLOCKDIMX-1)/BLOCKDIMX);
+
+  }
+  if(inRange)
+    out[nx*globalyindx+globalxindx] = sumOut; 
 }
 
 __global__ 
@@ -197,22 +244,24 @@ void reduceYBy2Kernel(int nx
   }
 }
 
+// Wrapper functions exposed by KernelLauncher
+
 void KernelLauncher::copy(FloatHolder& fhin, FloatHolder& fhout)
 {
   cudaEventRecord(start);
-  copyKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      // <<<dim3(1,(fhin.totalElements+BLOCKDIM-1)/BLOCKDIM),dim3(BLOCKDIM,1)>>>
-      (fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    copyKernel
+	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhin.nx()
+	, fhin.ny()
+	, fhin.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in copy: %f ms\n", ms);
-  printf("Effective throughput of copy: %f GB/s\n"
+  printf("Average elapsed time in copy: %f ms\n", ms);
+  printf("Average effective data rate of copy: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -221,38 +270,39 @@ void KernelLauncher::saxpy(FloatHolder& fhx
     , float a)
 {
   cudaEventRecord(start);
-  saxpyKernel
-      <<<dim3((fhx.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhx.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      // <<<dim3(1,(fhx.totalElements+BLOCKDIM-1)/BLOCKDIM),dim3(BLOCKDIM,1)>>>
-      (fhx.nx()
-      , fhx.ny()
-      , fhx.rawPtrGPU
-      , fhy.rawPtrGPU
-      , a);
+  // for (int rep=0; rep<NREPS; rep++)
+    saxpyKernel
+	<<<dim3((fhx.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhx.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhx.nx()
+	, fhx.ny()
+	, fhx.rawPtrGPU
+	, fhy.rawPtrGPU
+	, a);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in kernel saxpy: %f ms\n", ms);
-  printf("Effective throughput of kernel saxpy: %f GB/s\n"
+  printf("Average elapsed time in kernel saxpy: %f ms\n", ms);
+  printf("Average effective data rate of kernel saxpy: %f GB/s\n"
       , fhx.totalElements*sizeof(float)/ms/1e6);
 }
 
 void KernelLauncher::transposeNaive(FloatHolder& fhin, FloatHolder& fhout)
 { 
   cudaEventRecord(start);
-  transposeNaiveKernel
-      <<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhout.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fhout.nx()
-      , fhout.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    transposeNaiveKernel
+	<<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhout.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhout.nx()
+	, fhout.ny()
+	, fhin.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in transposeNaive: %f ms\n", ms);
-  printf("Effective throughput of transposeNaive: %f GB/s\n"
+  printf("Average elapsed time in transposeNaive: %f ms\n", ms);
+  printf("Average effective data rate of transposeNaive: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -263,18 +313,19 @@ void KernelLauncher::transposeFast(FloatHolder& fhin, FloatHolder& fhout)
         , BLOCKDIMX
         , BLOCKDIMY);
   cudaEventRecord(start);
-  transposeFastKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    transposeFastKernel
+	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhin.nx()
+	, fhin.ny()
+	, fhin.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranposeFast: %f ms\n", ms);
-  printf("Effective throughput of transposeFast: %f GB/s\n"
+  printf("Average elapsed time in tranposeFast: %f ms\n", ms);
+  printf("Average effective data rate of transposeFast: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -285,36 +336,39 @@ void KernelLauncher::transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fho
         , BLOCKDIMX
         , BLOCKDIMY);
   cudaEventRecord(start);
-  transposeFastNoBankConfKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    transposeFastNoBankConfKernel
+	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhin.nx()
+	, fhin.ny()
+	, fhin.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranposeFastNoBankConf: %f ms\n", ms);
-  printf("Effective throughput of transposeFastNoBankConf: %f GB/s\n"
+  printf("Average elapsed time in tranposeFastNoBankConf: %f ms\n", ms);
+  printf("Average effective data rate of transposeFastNoBankConf: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
 void KernelLauncher::transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout)
 {
+  printf("Currently just runs transposeFast.  To be done later...");
   cudaEventRecord(start);
-  transposeFastKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    transposeFastKernel
+	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fhin.nx()
+	, fhin.ny()
+	, fhin.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in tranpose32PerThread: %f ms\n", ms);
-  printf("Effective throughput of transpose32PerThread: %f GB/s\n"
+  printf("Average elapsed time in tranpose32PerThread: %f ms\n", ms);
+  printf("Average effective data rate of transpose32PerThread: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -323,19 +377,20 @@ void KernelLauncher::matxmatNaive(FloatHolder& fha
     , FloatHolder& fhout)
 {
   cudaEventRecord(start);
-  matxmatNaiveKernel
-      <<<dim3((fha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fha.nx()
-      , fha.ny()
-      , fha.rawPtrGPU
-      , fhb.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // for (int rep=0; rep<NREPS; rep++)
+    matxmatNaiveKernel
+	<<<dim3((fha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(fha.nx()
+	, fha.ny()
+	, fha.rawPtrGPU
+	, fhb.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in matxmatNaive: %f ms\n", ms);
-  printf("Effective throughput of matxmatNaive: %f GB/s\n"
+  printf("Average elapsed time in matxmatNaive: %f ms\n", ms);
+  printf("Average effective data rate of matxmatNaive: %f GB/s\n"
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -344,19 +399,22 @@ void KernelLauncher::matxmatTiles(FloatHolder& fha
     , FloatHolder& fhout)
 {
   cudaEventRecord(start);
-  matxmatTilesKernel
-      <<<dim3((fha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      (fha.nx()
-      , fha.ny()
-      , fha.rawPtrGPU
-      , fhb.rawPtrGPU
-      , fhout.rawPtrGPU);
+  // Uses square tiles.  
+  // printf("Using %dx%d grid of thread blocks\n",(fhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMX-1)/BLOCKDIMX);
+  // for (int rep=0; rep<NREPS; rep++)
+    matxmatTilesKernel
+	<<<dim3((fhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMX-1)/BLOCKDIMX), dim3(BLOCKDIMX,BLOCKDIMX)>>>
+	(fha.nx()
+	, fha.ny()
+	, fha.rawPtrGPU
+	, fhb.rawPtrGPU
+	, fhout.rawPtrGPU);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in matxmatTiles: %f ms \n", ms);
-  printf("Effective throughput of matxmatTiles: %f GB/s\n"
+  printf("Average elapsed time in matxmatTiles: %f ms \n", ms);
+  printf("Average effective data rate of matxmatTiles: %f GB/s\n"
       , fha.totalElements*sizeof(float)/ms/1e6);
 }
 
@@ -371,6 +429,7 @@ void KernelLauncher::reduceY(FloatHolder& fhin
       , fhin.rawPtrGPU
       , fhout.rawPtrGPU);
   cudaEventRecord(start);
+  // for (int rep=0; rep<NREPS; rep++) 
   {
     int yStride = 1;
     int pass = 0;
@@ -396,7 +455,7 @@ void KernelLauncher::reduceY(FloatHolder& fhin
   cudaEventSynchronize(stop);
   float ms = 0;
   cudaEventElapsedTime(&ms, start, stop);
-  printf("Elapsed time in reduceYBy2Kernel: %f ms\n", ms);
-  printf("Effective throughput of reduceYBy2Kernel: %f GB/s\n"
+  printf("Average elapsed time in reduceYBy2Kernel: %f ms\n", ms);
+  printf("Average effective data rate of reduceYBy2Kernel: %f GB/s\n"
       , fhin.totalElements*sizeof(float)/ms/1e6);
 }

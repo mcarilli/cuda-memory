@@ -1,7 +1,6 @@
 all:  main.x
-:q
 
-NVCC_FLAGS := -arch=sm_20
+NVCC_FLAGS := -arch=sm_20 --ptxas-options=-v
 
 srcfiles := main.cpp KernelLauncher.cu FloatHolder.cpp
 objfiles := main.o KernelLauncher.o FloatHolder.o

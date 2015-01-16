@@ -7,8 +7,8 @@
 #include "FloatHolder.h"
 #include "KernelLauncher.h"
 
-#define MATDIMX 1024
-#define MATDIMY 1024
+#define MATDIMX 64
+#define MATDIMY 64
 
 using namespace std;
 
@@ -21,38 +21,38 @@ class Error3d
 
 int main()
 {
-  void runTestCopy();
-  void runTestSaxpy();
-  void runTestTransposeNaive();
-  void runTestTransposeFast();
-  void runTestTransposeFastNoBankConf();
-  void runTestMatxmatNaive();
-  void runTestMatxmatTiles();
-  void runTestReduceY();
+  void runTestcopy();
+  void runTestsaxpy();
+  void runTesttransposeNaive();
+  void runTesttransposeFast();
+  void runTesttransposeFastNoBankConf();
+  void runTestmatxmatNaive();
+  void runTestmatxmatTiles();
+  void runTestreduceY();
 
   cout << fixed << setprecision(2);
   cout << endl;
-  runTestCopy();
+  runTestcopy();
   cout << endl;
-  runTestSaxpy();
+  runTestsaxpy();
   cout << endl;
-  runTestTransposeNaive();
+  runTesttransposeNaive();
   cout << endl;
-  runTestTransposeFast();
+  runTesttransposeFast();
   cout << endl;
-  runTestTransposeFastNoBankConf();
+  runTesttransposeFastNoBankConf();
   cout << endl;
-  runTestMatxmatNaive();
+  runTestmatxmatNaive();
   cout << endl;
-  runTestMatxmatTiles();
+  runTestmatxmatTiles();
   cout << endl;
-  runTestReduceY();
+  runTestreduceY();
   cout << endl;
 
   return 0;
 }  
 
-void runTestCopy()
+void runTestcopy()
 {  
   cout << "Testing copy" << std::endl;
 
@@ -101,7 +101,7 @@ void runTestCopy()
 }
 
 
-void runTestSaxpy() 
+void runTestsaxpy() 
 {  
   cout << "Testing saxpy" << std::endl;
 
@@ -150,7 +150,7 @@ void runTestSaxpy()
   }
 }
 
-void runTestTransposeNaive()
+void runTesttransposeNaive()
 {  
   cout << "Testing transposeNaive" << std::endl;
 
@@ -198,7 +198,7 @@ void runTestTransposeNaive()
   }
 }
 
-void runTestTransposeFast()
+void runTesttransposeFast()
 {  
   cout << "Testing transposeFast" << std::endl;
 
@@ -246,7 +246,7 @@ void runTestTransposeFast()
   }
 }
 
-void runTestTransposeFastNoBankConf() 
+void runTesttransposeFastNoBankConf() 
 {  
   cout << "Testing transposeFastNoBankConf" << std::endl;
 
@@ -294,7 +294,7 @@ void runTestTransposeFastNoBankConf()
   }
 }
 
-void runTestMatxmatNaive()
+void runTestmatxmatNaive()
 {  
   cout << "Testing matxmatNaive" << std::endl;
 
@@ -303,7 +303,8 @@ void runTestMatxmatNaive()
   float a = 2.0;
   FloatHolder fha(Nx,Ny);
   FloatHolder fhb(Ny,Nx);
-  FloatHolder fhout(Nx,Ny);
+  FloatHolder fhout(Ny,Ny);
+  FloatHolder fhsoln(Ny,Ny);
   KernelLauncher& kernelLauncher = KernelLauncher::instance();
 
   {
@@ -314,8 +315,17 @@ void runTestMatxmatNaive()
 	{
 	  fha(i,j,k) = indx;
           fhb(i,k,j) = indx;
-	  fhout(i,k,j) = 0;
 	  indx++;
+	}
+  }
+
+  {
+    for (int i=0; i<fhout.nz(); i++)
+      for (int j=0; j<fhout.ny(); j++)
+	for (int k=0; k<fhout.nx(); k++)
+	{
+	  fhout(i,j,k) = 0;
+	  fhsoln(i,j,k) = 0;
 	}
   }
 
@@ -328,35 +338,43 @@ void runTestMatxmatNaive()
   
   try 
   {
-    for (int i=0; i<fha.nz(); i++)
-      for (int j=0; j<fha.ny(); j++)
-	for (int k=0; k<fha.nx(); k++)
+    for (int i=0; i<fhout.nz(); i++)
+      for (int j=0; j<fhout.ny(); j++)
+	for (int k=0; k<fhout.nx(); k++)
 	{
-          // if(fhin(i,j,k) != fhout(i,k,j)) 
-          //  throw Error3d(i,j,k);
+          for (int x=0; x<fha.nx(); x++)
+            fhsoln(i,j,k) += fha(i,j,x)*fhb(i,x,k);
+          if(fhout(i,j,k) != fhsoln(i,j,k))
+            throw Error3d(i,j,k);
 	}
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
-    cout << "transposeFast failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
+    cout << "matxmatNaive failed!" << endl;
+    cout << "fhsoln ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhsoln(i,j,k) << std::endl;
+    cout << "fhout("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << fhout(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
   }
 }
 
-void runTestMatxmatTiles()
+void runTestmatxmatTiles()
 {  
   cout << "Testing matxmatTiles" << std::endl;
+
+  // float sum = 0;
+  // for (int i=0; i<64; i++)
+  //   sum += (64+i)*i;
+  // std::cout << sum << endl; 
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
   float a = 2.0;
   FloatHolder fha(Nx,Ny);
   FloatHolder fhb(Ny,Nx);
-  FloatHolder fhout(Nx,Ny);
+  FloatHolder fhout(Ny,Ny);
+  FloatHolder fhsoln(Ny,Ny);
   KernelLauncher& kernelLauncher = KernelLauncher::instance();
 
   {
@@ -365,10 +383,19 @@ void runTestMatxmatTiles()
       for (int j=0; j<fha.ny(); j++)
 	for (int k=0; k<fha.nx(); k++)
 	{
-	  fha(i,j,k) = 1;
-          fhb(i,k,j) = 1;
-	  fhout(i,k,j) = 0;
+	  fha(i,j,k) = indx;
+          fhb(i,k,j) = indx;
 	  indx++;
+	}
+  }
+
+  {
+    for (int i=0; i<fhout.nz(); i++)
+      for (int j=0; j<fhout.ny(); j++)
+	for (int k=0; k<fhout.nx(); k++)
+	{
+	  fhout(i,j,k) = 0;
+	  fhsoln(i,j,k) = 0;
 	}
   }
 
@@ -381,26 +408,30 @@ void runTestMatxmatTiles()
   
   try 
   {
-    for (int i=0; i<fha.nz(); i++)
-      for (int j=0; j<fha.ny(); j++)
-	for (int k=0; k<fhb.nx(); k++)
+    for (int i=0; i<fhout.nz(); i++)
+      for (int j=0; j<fhout.ny(); j++)
+	for (int k=0; k<fhout.nx(); k++)
 	{
-          if(fhout(i,j,k) != MATDIMX) 
+          for (int x=0; x<fha.nx(); x++)
+            fhsoln(i,j,k) += fha(i,j,x)*fhb(i,x,k);
+          if(fhout(i,j,k) != fhsoln(i,j,k))
+          {
             throw Error3d(i,j,k);
+          }
 	}
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
-    cout << "transposeFast failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
+    cout << "matxmatTiles failed!" << endl;
+    cout << "fhsoln ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << fhsoln(i,j,k) << std::endl;
+    cout << "fhout("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << fhout(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
   }
 }
 
-void runTestReduceY()
+void runTestreduceY()
 {  
   cout << "Testing reduceY" << std::endl;
 
