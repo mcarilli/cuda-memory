@@ -1,7 +1,7 @@
 cuda-memory
 ===========
 
-Playing around with CUDA kernel optimization.
+Playing around with GPU kernel optimization.
 
 Current Kernels:
 
