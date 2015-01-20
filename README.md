@@ -1,10 +1,9 @@
 cuda-memory
 ===========
 
-Playing around with GPU memory optimization
+Playing around with CUDA kernel optimization.
 
-Current Kernels
-All operate on 2D matrices, set up in memory as pseudo-2D arrays.
+Current Kernels:
 
 copy -- Simple copy as benchmark.
 
