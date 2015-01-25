@@ -17,6 +17,6 @@ transposeFastNoBankConf -- Same as transposeFast, but eliminates bank conflicts 
 
 matxmatNaive -- Naive matrix multiply.  Each thread handles one element of output array; all memory accesses are global, some not coalesced.
 
-matxmatTiles -- Matrix multiply using shared memory tiles to ensure that all gmem accesses are coalesced.  Smem bank conflicts are also eliminated.
+matxmatTiles -- Matrix multiply using shared memory tiles to reduce total number of gmem acceses and ensure that all gmem accesses are coalesced.  Smem bank conflicts are also eliminated.
 
 reduceY -- Reduces (sums) columns of matrix into top row.
