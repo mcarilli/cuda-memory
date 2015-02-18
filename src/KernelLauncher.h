@@ -12,6 +12,10 @@ class KernelLauncher
   KernelLauncher& operator=(KernelLauncher&); 
   KernelLauncher(const KernelLauncher&);
   cudaEvent_t start, stop;
+
+  inline void startTiming();
+  inline void finishTiming(const char* kernelName, int totalElements);
+
   public:
   static KernelLauncher& instance() { return kl; }
   void copy(FloatHolder& fhin, FloatHolder& fhout);
