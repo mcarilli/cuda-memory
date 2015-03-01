@@ -1,7 +1,8 @@
 #include <cstdlib>
 #include <iostream>
 #include "KernelLauncher.h"
-#include "FloatHolder.h"
+#include "datatype.h"
+#include "DataHolder.h"
 // #include "cuPrintf.cu"
 
 //For 1D kernels
@@ -24,43 +25,44 @@
 //   cudaEventElapsedTime(&ms, start, stop); \
 //   std::cout << "Average elapsed time in " << #kernelName << ":  " << ms << " ms\n"; \
 //   std::cout << "Average effective data rate of " << #kernelName ":  " \
-//       << fhin.totalElements*sizeof(float)/ms/1e6 << " GB/s\n"; \
+//       << dhin.totalElements*sizeof(float)/ms/1e6 << " GB/s\n"; \
 // } while(0) 
 
-KernelLauncher KernelLauncher::kl;
+template<class T> KernelLauncher<T> KernelLauncher<T>::kl;
 
-KernelLauncher::KernelLauncher()
+template<class T> KernelLauncher<T>::KernelLauncher()
 {
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 }
 
-KernelLauncher::~KernelLauncher()
+template<class T> KernelLauncher<T>::~KernelLauncher()
 {
   cudaEventDestroy(start);
   cudaEventDestroy(stop);
 }
 
-void KernelLauncher::startTiming()
+template<class T> void KernelLauncher<T>::startTiming()
 {
   cudaEventRecord(start);
 }
 
-void KernelLauncher::finishTiming(const char* kernelName, int totalElements)
+template<class T> void KernelLauncher<T>::finishTiming(const char* kernelName, DataHolder<T>& dh)
 {
   cudaEventRecord(stop); 
   cudaEventSynchronize(stop); 
   float ms = 0; 
   cudaEventElapsedTime(&ms, start, stop); 
+  std::cout << "sizeof(datatype):  " << sizeof(T) << "\n"; 
   std::cout << "Average elapsed time in " << kernelName << ":  " << ms << " ms\n"; 
   std::cout << "Average effective data rate of " << kernelName << ":  " 
-      << totalElements*sizeof(float)/ms/1e6 << " GB/s\n"; 
+      << dh.totalElements*sizeof(T)/ms/1e6 << " GB/s\n"; 
 }
 
 //Kernels
 
-__global__ 
-void copyKernel(int nx, int ny, float* in, float *out)
+template<class T> __global__ void 
+copyKernel(int nx, int ny, T* in, T *out)
 {
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
@@ -69,8 +71,8 @@ void copyKernel(int nx, int ny, float* in, float *out)
     out[i] = in[i];
 }
 
-__global__
-void saxpyKernel(int nx, int ny, float *x, float *y, float a)
+template<class T> __global__ void 
+saxpyKernel(int nx, int ny, T *x, T *y, T a)
 {
   // Same structure as other kernels for consistent speed comparison. 
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
@@ -81,11 +83,11 @@ void saxpyKernel(int nx, int ny, float *x, float *y, float a)
   // printf("Thread number %d. y = %f, x = %f\n", threadIdx.x, y[i], x[i]);
 }
 
-__global__
-void transposeNaiveKernel(int nx_out /*=ny_in*/
+template<class T> __global__ void 
+transposeNaiveKernel(int nx_out /*=ny_in*/
     , int ny_out /*=nx_in*/
-    , float* in
-    , float* out)
+    , T* in
+    , T* out)
 {
   int globalxindx_out = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx_out = blockIdx.y*blockDim.y + threadIdx.y;
@@ -102,14 +104,14 @@ void transposeNaiveKernel(int nx_out /*=ny_in*/
 }
 
 // Inspired by http://www.cs.nyu.edu/manycores/cuda_many_cores.pdf
-__global__ 
-void transposeFastKernel(int nx_in
+template<class T> __global__ void 
+transposeFastKernel(int nx_in
     , int ny_in
-    , float* in
-    , float* out)
+    , T* in
+    , T* out)
 {
-  __shared__ float staging_in[BLOCKDIMY][BLOCKDIMX];
-  __shared__ float staging_out[BLOCKDIMX][BLOCKDIMY];
+  __shared__ T staging_in[BLOCKDIMY][BLOCKDIMX];
+  __shared__ T staging_out[BLOCKDIMX][BLOCKDIMY];
   // For matrix | A B | with submatrices A, B, C, D, 
   //            | C D |
   // | A B |   = | A_T C_T |
@@ -134,14 +136,14 @@ void transposeFastKernel(int nx_in
         staging_out[threadIdx.y][threadIdx.x];
 }
 
-__global__
-void transposeFastNoBankConfKernel(int nx_in
+template<class T> __global__ void 
+transposeFastNoBankConfKernel(int nx_in
     , int ny_in
-    , float* in
-    , float* out)
+    , T* in
+    , T* out)
 {
-  __shared__ float staging_in[BLOCKDIMY][BLOCKDIMX+1];
-  __shared__ float staging_out[BLOCKDIMX][BLOCKDIMY+1];
+  __shared__ T staging_in[BLOCKDIMY][BLOCKDIMX+1];
+  __shared__ T staging_out[BLOCKDIMX][BLOCKDIMY+1];
   // For matrix | A B | with submatrices A, B, C, D, 
   //            | C D |
   // | A B |   = | A_T C_T |
@@ -166,17 +168,17 @@ void transposeFastNoBankConfKernel(int nx_in
         staging_out[threadIdx.y][threadIdx.x];
 }
 
-__global__
-void matxmatNaiveKernel(int nx
+template<class T> __global__ void 
+matxmatNaiveKernel(int nx
       , int ny
-      , float* a
-      , float* b
-      , float* out)
+      , T* a
+      , T* b
+      , T* out)
 {
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
   int i = nx*globalyindx+globalxindx;
-  float sum = 0;
+  T sum = 0;
   // #pragma unroll // Unrolling NOT useful here because nx not necessarily known at compile time
   for (int x=0; x<nx; x++)
     if (globalxindx < nx && globalyindx < ny)
@@ -185,18 +187,18 @@ void matxmatNaiveKernel(int nx
     out[i] = sum;
 }
 
-__global__
-void matxmatTilesKernel(int nx
+template<class T> __global__ void 
+matxmatTilesKernel(int nx
       , int ny
-      , float* a
-      , float* b
-      , float* out)
+      , T* a
+      , T* b
+      , T* out)
 {
   // Square tiles in smem
-  __shared__ float tileA[BLOCKDIMX][BLOCKDIMX+1];
-  __shared__ float tileB[BLOCKDIMX][BLOCKDIMX+1];
+  __shared__ T tileA[BLOCKDIMX][BLOCKDIMX+1];
+  __shared__ T tileB[BLOCKDIMX][BLOCKDIMX+1];
 
-  float sumOut = 0; // Holds output for this thread
+  T sumOut = 0; // Holds output for this thread
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = blockIdx.y*blockDim.y + threadIdx.y;
   int tileATopLeftxindx = 0;
@@ -246,11 +248,11 @@ void matxmatTilesKernel(int nx
     out[nx*globalyindx+globalxindx] = sumOut; 
 }
 
-__global__ 
-void reduceYBy2Kernel(int nx
+template<class T> __global__ void 
+reduceYBy2Kernel(int nx
     , int ny
     , int yStride
-    , float* inout)
+    , T* inout)
 {
   // Reduce like this
   //  a b  ->  a+c b+d  // a+c was produced by thread 1, b+d by thread 2, etc 
@@ -262,7 +264,7 @@ void reduceYBy2Kernel(int nx
   int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
   int globalyindx = 2*yStride*(blockIdx.y*blockDim.y + threadIdx.y);
 
-  float sum = 0;
+  T sum = 0;
 
   if (globalxindx < nx && globalyindx < ny)
   {
@@ -273,49 +275,52 @@ void reduceYBy2Kernel(int nx
   }
 }
 
-// Wrapper functions exposed by KernelLauncher
+// Wrapper functions exposed by KernelLauncher<T>
 
-void KernelLauncher::copy(FloatHolder& fhin, FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::copy(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
 {
   startTiming();
-  copyKernel<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY) \
-      , dim3(BLOCKDIMX,BLOCKDIMY)>>>(fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
-  finishTiming("copyKernel", fhin.totalElements);
+  copyKernel<<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY) \
+      , dim3(BLOCKDIMX,BLOCKDIMY)>>>(dhin.nx()
+      , dhin.ny()
+      , dhin.rawPtrGPU
+      , dhout.rawPtrGPU);
+  finishTiming("copyKernel", dhin);
 }
 
-void KernelLauncher::saxpy(FloatHolder& fhx
-    , FloatHolder& fhy
-    , float a)
+template<class T> void KernelLauncher<T>::saxpy(DataHolder<T>& dhx
+    , DataHolder<T>& dhy
+    , T a)
 {
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
     saxpyKernel
-	<<<dim3((fhx.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhx.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fhx.nx()
-	, fhx.ny()
-	, fhx.rawPtrGPU
-	, fhy.rawPtrGPU
+	<<<dim3((dhx.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhx.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dhx.nx()
+	, dhx.ny()
+	, dhx.rawPtrGPU
+	, dhy.rawPtrGPU
 	, a);
-  finishTiming("saxpy", fhx.totalElements);
+  finishTiming("saxpy", dhx);
 }
 
-void KernelLauncher::transposeNaive(FloatHolder& fhin, FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::transposeNaive(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
 {
   startTiming(); 
   // for (int rep=0; rep<NREPS; rep++)
     transposeNaiveKernel
-	<<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhout.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fhout.nx()
-	, fhout.ny()
-	, fhin.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("transposeNaive", fhin.totalElements);
+	<<<dim3((dhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhout.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dhout.nx()
+	, dhout.ny()
+	, dhin.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("transposeNaive", dhin);
 }
 
-void KernelLauncher::transposeFast(FloatHolder& fhin, FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::transposeFast(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
 {
   if (BLOCKDIMX != BLOCKDIMY) 
     printf("Warning:  transposeFast will fail if BLOCKDIMX (%d) != BLOCKDIMY (%d)"
@@ -324,15 +329,16 @@ void KernelLauncher::transposeFast(FloatHolder& fhin, FloatHolder& fhout)
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
     transposeFastKernel
-	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fhin.nx()
-	, fhin.ny()
-	, fhin.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("transposeFast", fhin.totalElements);
+	<<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dhin.nx()
+	, dhin.ny()
+	, dhin.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("transposeFast", dhin);
 }
 
-void KernelLauncher::transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::transposeFastNoBankConf(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
 {
   if (BLOCKDIMX != BLOCKDIMY)
     printf("Warning:  transposeFastNoBankConf will fail if BLOCKDIMX (%d) != BLOCKDIMY (%d)"
@@ -341,78 +347,78 @@ void KernelLauncher::transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fho
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
     transposeFastNoBankConfKernel
-	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fhin.nx()
-	, fhin.ny()
-	, fhin.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("transposeFastNoBankConf", fhin.totalElements);
+	<<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dhin.nx()
+	, dhin.ny()
+	, dhin.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("transposeFastNoBankConf", dhin);
 }
 
-void KernelLauncher::transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::transpose32PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout)
 {
   printf("Currently just runs transposeFast.  To be done later...");
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
     transposeFastKernel
-	<<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fhin.nx()
-	, fhin.ny()
-	, fhin.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("transpose32PerThread", fhin.totalElements);
+	<<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dhin.nx()
+	, dhin.ny()
+	, dhin.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("transpose32PerThread", dhin);
 }
 
-void KernelLauncher::matxmatNaive(FloatHolder& fha
-    , FloatHolder& fhb
-    , FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::matxmatNaive(DataHolder<T>& dha
+    , DataHolder<T>& dhb
+    , DataHolder<T>& dhout)
 {
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
     matxmatNaiveKernel
-	<<<dim3((fha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	(fha.nx()
-	, fha.ny()
-	, fha.rawPtrGPU
-	, fhb.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("matxmatNaive", fha.totalElements);
+	<<<dim3((dha.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dha.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	(dha.nx()
+	, dha.ny()
+	, dha.rawPtrGPU
+	, dhb.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("matxmatNaive", dha);
 }
 
-void KernelLauncher::matxmatTiles(FloatHolder& fha
-    , FloatHolder& fhb
-    , FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::matxmatTiles(DataHolder<T>& dha
+    , DataHolder<T>& dhb
+    , DataHolder<T>& dhout)
 {
   startTiming();
   // Uses square tiles.  
-  // printf("Using %dx%d grid of thread blocks\n",(fhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMX-1)/BLOCKDIMX);
+  // printf("Using %dx%d grid of thread blocks\n",(dhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dha.ny()+BLOCKDIMX-1)/BLOCKDIMX);
   // for (int rep=0; rep<NREPS; rep++)
     matxmatTilesKernel
-	<<<dim3((fhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fha.ny()+BLOCKDIMX-1)/BLOCKDIMX), dim3(BLOCKDIMX,BLOCKDIMX)>>>
-	(fha.nx()
-	, fha.ny()
-	, fha.rawPtrGPU
-	, fhb.rawPtrGPU
-	, fhout.rawPtrGPU);
-  finishTiming("matxmatTiles", fha.totalElements);
+	<<<dim3((dhb.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dha.ny()+BLOCKDIMX-1)/BLOCKDIMX), dim3(BLOCKDIMX,BLOCKDIMX)>>>
+	(dha.nx()
+	, dha.ny()
+	, dha.rawPtrGPU
+	, dhb.rawPtrGPU
+	, dhout.rawPtrGPU);
+  finishTiming("matxmatTiles", dha);
 }
 
-void KernelLauncher::reduceY(FloatHolder& fhin
-    , FloatHolder& fhout)
+template<class T> void KernelLauncher<T>::reduceY(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
 {
   copyKernel
-      <<<dim3((fhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(fhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-      // <<<dim3(1,(fhin.totalElements+BLOCKDIM-1)/BLOCKDIM),dim3(BLOCKDIM,1)>>>
-      (fhin.nx()
-      , fhin.ny()
-      , fhin.rawPtrGPU
-      , fhout.rawPtrGPU);
+      <<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+      // <<<dim3(1,(dhin.totalElements+BLOCKDIM-1)/BLOCKDIM),dim3(BLOCKDIM,1)>>>
+      (dhin.nx()
+      , dhin.ny()
+      , dhin.rawPtrGPU
+      , dhout.rawPtrGPU);
   startTiming();
   // for (int rep=0; rep<NREPS; rep++) 
   {
     int yStride = 1;
     int pass = 0;
-    int nyRemaining = fhout.ny();
+    int nyRemaining = dhout.ny();
     while (nyRemaining >= 2)
     {
       // std::cout << "pass:  " << pass << std::endl;
@@ -420,15 +426,20 @@ void KernelLauncher::reduceY(FloatHolder& fhin
       // std::cout << "nyRemaining:  " << nyRemaining << std::endl;
       // std::cout << "Launching with: " << (nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY) << " blocks in Y direction " << std::endl;
       reduceYBy2Kernel
-	  <<<dim3((fhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY)), dim3(BLOCKDIMX,BLOCKDIMY)>>>
-	  (fhout.nx()
-	   , fhout.ny()
+	  <<<dim3((dhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY)), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+	  (dhout.nx()
+	   , dhout.ny()
            , yStride
-	   , fhout.rawPtrGPU);
+	   , dhout.rawPtrGPU);
       pass++;
       yStride *= 2; 
       nyRemaining /= 2;
     }
   }
-  finishTiming("reduceYBy2Kernel", fhin.totalElements);
+  finishTiming("reduceYBy2Kernel", dhin);
 }
+
+
+// Force instantiation of KernelLauncher<> for datatype selected in datatype.h
+template class KernelLauncher<datatype>;
+

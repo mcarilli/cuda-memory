@@ -4,7 +4,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
-#include "FloatHolder.h"
+#include "datatype.h"
+#include "DataHolder.h"
 #include "KernelLauncher.h"
 
 #define MATDIMX 64
@@ -19,332 +20,328 @@ class Error3d
   Error3d(int ii, int jj, int kk) : i(ii), j(jj), k(kk) {}
 };
 
+template<class T> void runTestcopy();
+template<class T> void runTestsaxpy();
+template<class T> void runTesttransposeNaive();
+template<class T> void runTesttransposeFast();
+template<class T> void runTesttransposeFastNoBankConf();
+template<class T> void runTestmatxmatNaive();
+template<class T> void runTestmatxmatTiles();
+template<class T> void runTestreduceY();
+
+
 int main()
 {
-  void runTestcopy();
-  void runTestsaxpy();
-  void runTesttransposeNaive();
-  void runTesttransposeFast();
-  void runTesttransposeFastNoBankConf();
-  void runTestmatxmatNaive();
-  void runTestmatxmatTiles();
-  void runTestreduceY();
-
   cout << fixed << setprecision(2);
   cout << endl;
-  runTestcopy();
+  runTestcopy<datatype>();
   cout << endl;
-  runTestsaxpy();
+  runTestsaxpy<datatype>();
   cout << endl;
-  runTesttransposeNaive();
+  runTesttransposeNaive<datatype>();
   cout << endl;
-  runTesttransposeFast();
+  runTesttransposeFast<datatype>();
   cout << endl;
-  runTesttransposeFastNoBankConf();
+  runTesttransposeFastNoBankConf<datatype>();
   cout << endl;
-  runTestmatxmatNaive();
+  runTestmatxmatNaive<datatype>();
   cout << endl;
-  runTestmatxmatTiles();
+  runTestmatxmatTiles<datatype>();
   cout << endl;
-  runTestreduceY();
+  runTestreduceY<datatype>();
   cout << endl;
 
   return 0;
 }  
 
-void runTestcopy()
+template<class T> void runTestcopy()
 {  
   cout << "Testing copy" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhin(Nx,Ny);
-  FloatHolder fhout(Nx,Ny);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dhin(Nx,Ny);
+  DataHolder<T> dhout(Nx,Ny);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
 	{
-	  fhin(i,j,k) = indx;
-	  fhout(i,j,k) = 0.;
+	  dhin(i,j,k) = indx;
+	  dhout(i,j,k) = 0;
 	  indx++;
 	}
   }
 
-  fhin.copyCPUtoGPU();
+  dhin.copyCPUtoGPU();
 
-  kernelLauncher.copy(fhin, fhout);
+  kernelLauncher.copy(dhin, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try
   {
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-        for (int k=0; k<fhin.nx(); k++)
-          if(fhin(i,j,k) != fhout(i,j,k))
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+        for (int k=0; k<dhin.nx(); k++)
+          if(dhin(i,j,k) != dhout(i,j,k))
             throw Error3d(i,j,k);
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "copy failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhin(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
+    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << dhout(i,k,j) << std::endl;
   }  
 }
 
 
-void runTestsaxpy() 
+template<class T> void runTestsaxpy() 
 {  
   cout << "Testing saxpy" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhx(Nx,Ny);
-  FloatHolder fhy(Nx,Ny);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  T a = 2;
+  DataHolder<T> dhx(Nx,Ny);
+  DataHolder<T> dhy(Nx,Ny);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhx.nz(); i++)
-      for (int j=0; j<fhx.ny(); j++)
-	for (int k=0; k<fhx.nx(); k++)
+    for (int i=0; i<dhx.nz(); i++)
+      for (int j=0; j<dhx.ny(); j++)
+	for (int k=0; k<dhx.nx(); k++)
 	{
-	  fhx[indx] = 1.0;
-	  fhy[indx] = 2.0;
+	  dhx[indx] = 1;
+	  dhy[indx] = 2;
 	  indx++;
 	}
   }
 
-  fhx.copyCPUtoGPU();
-  fhy.copyCPUtoGPU();
+  dhx.copyCPUtoGPU();
+  dhy.copyCPUtoGPU();
 
-  kernelLauncher.saxpy(fhx, fhy, a);
+  kernelLauncher.saxpy(dhx, dhy, a);
 
-  fhy.copyGPUtoCPU();
+  dhy.copyGPUtoCPU();
   
   try
   {
-    for (int i=0; i<fhy.nz(); i++)
-      for (int j=0; j<fhy.ny(); j++)
-        for (int k=0; k<fhy.nx(); k++)
-          if(fhy(i,j,k) != 4.0)
+    for (int i=0; i<dhy.nz(); i++)
+      for (int j=0; j<dhy.ny(); j++)
+        for (int k=0; k<dhy.nx(); k++)
+          if(dhy(i,j,k) != 4)
             throw Error3d(i,j,k);
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "saxpy failed!" << endl;
-    cout << "fhy ("<< i << "," << j << "," << k << "):  "
-        << setw(10) << fhy(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-        << setw(10) << fhy(i,k,j) << std::endl;
+    cout << "dhy ("<< i << "," << j << "," << k << "):  "
+        << setw(10) << dhy(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << k << "," << j << "):  "
+        << setw(10) << dhy(i,k,j) << std::endl;
   }
 }
 
-void runTesttransposeNaive()
+template<class T> void runTesttransposeNaive()
 {  
   cout << "Testing transposeNaive" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhin(Nx,Ny);
-  FloatHolder fhout(Ny,Nx);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dhin(Nx,Ny);
+  DataHolder<T> dhout(Ny,Nx);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
 	{
-	  fhin(i,j,k) = indx;
-	  fhout(i,k,j) = 0;
+	  dhin(i,j,k) = indx;
+	  dhout(i,k,j) = 0;
 	  indx++;
 	}
   }
 
-  fhin.copyCPUtoGPU();
+  dhin.copyCPUtoGPU();
 
-  kernelLauncher.transposeNaive(fhin, fhout);
+  kernelLauncher.transposeNaive(dhin, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try
   {
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-        for (int k=0; k<fhin.nx(); k++)
-          if(fhin(i,j,k) != fhout(i,k,j))
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+        for (int k=0; k<dhin.nx(); k++)
+          if(dhin(i,j,k) != dhout(i,k,j))
             throw Error3d(i,j,k);
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "transposeNaive failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhin(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
+    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << dhout(i,k,j) << std::endl;
   }
 }
 
-void runTesttransposeFast()
+template<class T> void runTesttransposeFast()
 {  
   cout << "Testing transposeFast" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhin(Nx,Ny);
-  FloatHolder fhout(Ny,Nx);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dhin(Nx,Ny);
+  DataHolder<T> dhout(Ny,Nx);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
 	{
-	  fhin(i,j,k) = indx;
-	  fhout(i,k,j) = 0;
+	  dhin(i,j,k) = indx;
+	  dhout(i,k,j) = 0;
 	  indx++;
 	}
   }
 
-  fhin.copyCPUtoGPU();
+  dhin.copyCPUtoGPU();
 
-  kernelLauncher.transposeFast(fhin, fhout);
+  kernelLauncher.transposeFast(dhin, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try 
   {
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
-          if(fhin(i,j,k) != fhout(i,k,j)) 
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
+          if(dhin(i,j,k) != dhout(i,k,j)) 
             throw Error3d(i,j,k);
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "transposeFast failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhin(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
+    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << dhout(i,k,j) << std::endl;
   }
 }
 
-void runTesttransposeFastNoBankConf() 
+template<class T> void runTesttransposeFastNoBankConf() 
 {  
   cout << "Testing transposeFastNoBankConf" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhin(Nx,Ny);
-  FloatHolder fhout(Ny,Nx);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dhin(Nx,Ny);
+  DataHolder<T> dhout(Ny,Nx);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
 	{
-	  fhin(i,j,k) = indx;
-	  fhout(i,k,j) = 0;
+	  dhin(i,j,k) = indx;
+	  dhout(i,k,j) = 0;
 	  indx++;
 	}
   }
 
-  fhin.copyCPUtoGPU();
+  dhin.copyCPUtoGPU();
 
-  kernelLauncher.transposeFastNoBankConf(fhin, fhout);
+  kernelLauncher.transposeFastNoBankConf(dhin, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try 
   {
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
-          if(fhin(i,j,k) != fhout(i,k,j)) 
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
+          if(dhin(i,j,k) != dhout(i,k,j)) 
             throw Error3d(i,j,k);
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "transposeFastNoBankConf failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhin(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << k << "," << j << "):  "
-	<< setw(10) << fhout(i,k,j) << std::endl;
+    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << k << "," << j << "):  "
+	<< setw(10) << dhout(i,k,j) << std::endl;
   }
 }
 
-void runTestmatxmatNaive()
+template<class T> void runTestmatxmatNaive()
 {  
   cout << "Testing matxmatNaive" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fha(Nx,Ny);
-  FloatHolder fhb(Ny,Nx);
-  FloatHolder fhout(Ny,Ny);
-  FloatHolder fhsoln(Ny,Ny);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dha(Nx,Ny);
+  DataHolder<T> dhb(Ny,Nx);
+  DataHolder<T> dhout(Ny,Ny);
+  DataHolder<T> dhsoln(Ny,Ny);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fha.nz(); i++)
-      for (int j=0; j<fha.ny(); j++)
-	for (int k=0; k<fha.nx(); k++)
+    for (int i=0; i<dha.nz(); i++)
+      for (int j=0; j<dha.ny(); j++)
+	for (int k=0; k<dha.nx(); k++)
 	{
-	  fha(i,j,k) = indx;
-          fhb(i,k,j) = indx;
+	  dha(i,j,k) = indx;
+          dhb(i,k,j) = indx;
 	  indx++;
 	}
   }
 
   {
-    for (int i=0; i<fhout.nz(); i++)
-      for (int j=0; j<fhout.ny(); j++)
-	for (int k=0; k<fhout.nx(); k++)
+    for (int i=0; i<dhout.nz(); i++)
+      for (int j=0; j<dhout.ny(); j++)
+	for (int k=0; k<dhout.nx(); k++)
 	{
-	  fhout(i,j,k) = 0;
-	  fhsoln(i,j,k) = 0;
+	  dhout(i,j,k) = 0;
+	  dhsoln(i,j,k) = 0;
 	}
   }
 
-  fha.copyCPUtoGPU();
-  fhb.copyCPUtoGPU();
+  dha.copyCPUtoGPU();
+  dhb.copyCPUtoGPU();
 
-  kernelLauncher.matxmatNaive(fha, fhb, fhout);
+  kernelLauncher.matxmatNaive(dha, dhb, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try 
   {
-    for (int i=0; i<fhout.nz(); i++)
-      for (int j=0; j<fhout.ny(); j++)
-	for (int k=0; k<fhout.nx(); k++)
+    for (int i=0; i<dhout.nz(); i++)
+      for (int j=0; j<dhout.ny(); j++)
+	for (int k=0; k<dhout.nx(); k++)
 	{
-          for (int x=0; x<fha.nx(); x++)
-            fhsoln(i,j,k) += fha(i,j,x)*fhb(i,x,k);
-          if(fhout(i,j,k) != fhsoln(i,j,k))
+          for (int x=0; x<dha.nx(); x++)
+            dhsoln(i,j,k) += dha(i,j,x)*dhb(i,x,k);
+          if(dhout(i,j,k) != dhsoln(i,j,k))
             throw Error3d(i,j,k);
 	}
   }
@@ -352,69 +349,63 @@ void runTestmatxmatNaive()
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "matxmatNaive failed!" << endl;
-    cout << "fhsoln ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhsoln(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhout(i,j,k) << std::endl;
+    cout << "dhsoln ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhsoln(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhout(i,j,k) << std::endl;
   }
 }
 
-void runTestmatxmatTiles()
+template<class T> void runTestmatxmatTiles()
 {  
   cout << "Testing matxmatTiles" << std::endl;
 
-  // float sum = 0;
-  // for (int i=0; i<64; i++)
-  //   sum += (64+i)*i;
-  // std::cout << sum << endl; 
-
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fha(Nx,Ny);
-  FloatHolder fhb(Ny,Nx);
-  FloatHolder fhout(Ny,Ny);
-  FloatHolder fhsoln(Ny,Ny);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dha(Nx,Ny);
+  DataHolder<T> dhb(Ny,Nx);
+  DataHolder<T> dhout(Ny,Ny);
+  DataHolder<T> dhsoln(Ny,Ny);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fha.nz(); i++)
-      for (int j=0; j<fha.ny(); j++)
-	for (int k=0; k<fha.nx(); k++)
+    for (int i=0; i<dha.nz(); i++)
+      for (int j=0; j<dha.ny(); j++)
+	for (int k=0; k<dha.nx(); k++)
 	{
-	  fha(i,j,k) = indx;
-          fhb(i,k,j) = indx;
+	  dha(i,j,k) = indx;
+          dhb(i,k,j) = indx;
 	  indx++;
 	}
   }
 
   {
-    for (int i=0; i<fhout.nz(); i++)
-      for (int j=0; j<fhout.ny(); j++)
-	for (int k=0; k<fhout.nx(); k++)
+    for (int i=0; i<dhout.nz(); i++)
+      for (int j=0; j<dhout.ny(); j++)
+	for (int k=0; k<dhout.nx(); k++)
 	{
-	  fhout(i,j,k) = 0;
-	  fhsoln(i,j,k) = 0;
+	  dhout(i,j,k) = 0;
+	  dhsoln(i,j,k) = 0;
 	}
   }
 
-  fha.copyCPUtoGPU();
-  fhb.copyCPUtoGPU();
+  dha.copyCPUtoGPU();
+  dhb.copyCPUtoGPU();
 
-  kernelLauncher.matxmatTiles(fha, fhb, fhout);
+  kernelLauncher.matxmatTiles(dha, dhb, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
   
   try 
   {
-    for (int i=0; i<fhout.nz(); i++)
-      for (int j=0; j<fhout.ny(); j++)
-	for (int k=0; k<fhout.nx(); k++)
+    for (int i=0; i<dhout.nz(); i++)
+      for (int j=0; j<dhout.ny(); j++)
+	for (int k=0; k<dhout.nx(); k++)
 	{
-          for (int x=0; x<fha.nx(); x++)
-            fhsoln(i,j,k) += fha(i,j,x)*fhb(i,x,k);
-          if(fhout(i,j,k) != fhsoln(i,j,k))
+          for (int x=0; x<dha.nx(); x++)
+            dhsoln(i,j,k) += dha(i,j,x)*dhb(i,x,k);
+          if(dhout(i,j,k) != dhsoln(i,j,k))
           {
             throw Error3d(i,j,k);
           }
@@ -424,62 +415,61 @@ void runTestmatxmatTiles()
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "matxmatTiles failed!" << endl;
-    cout << "fhsoln ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhsoln(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhout(i,j,k) << std::endl;
+    cout << "dhsoln ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhsoln(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhout(i,j,k) << std::endl;
   }
 }
 
-void runTestreduceY()
+template<class T> void runTestreduceY()
 {  
   cout << "Testing reduceY" << std::endl;
 
   int Nx = MATDIMX;
   int Ny = MATDIMY;
-  float a = 2.0;
-  FloatHolder fhin(Nx,Ny);
-  FloatHolder fhout(Nx,Ny);
-  KernelLauncher& kernelLauncher = KernelLauncher::instance();
+  DataHolder<T> dhin(Nx,Ny);
+  DataHolder<T> dhout(Nx,Ny);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
     int indx = 0;
-    for (int i=0; i<fhin.nz(); i++)
-      for (int j=0; j<fhin.ny(); j++)
-	for (int k=0; k<fhin.nx(); k++)
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
 	{
-	  fhin(i,j,k) = 1;  // Warning:  try big numbers here and you will
-	  fhout(i,j,k) = 0; // exceed floating-point precision!
+	  dhin(i,j,k) = 1;  // Warning:  try big numbers here and you will
+	  dhout(i,j,k) = 0; // exceed floating-point precision!
 	  indx++;
 	}
   }
 
-  fhin.copyCPUtoGPU();
+  dhin.copyCPUtoGPU();
 
-  kernelLauncher.reduceY(fhin, fhout);
+  kernelLauncher.reduceY(dhin, dhout);
 
-  fhout.copyGPUtoCPU();
+  dhout.copyGPUtoCPU();
 
-  for (int i=0; i<fhin.nz(); i++)
-    for (int k=0; k<fhin.nx(); k++)
-      for (int j=1; j<fhin.ny(); j++)
-	  fhin(i,0,k) += fhin(i,j,k);
+  for (int i=0; i<dhin.nz(); i++)
+    for (int k=0; k<dhin.nx(); k++)
+      for (int j=1; j<dhin.ny(); j++)
+	  dhin(i,0,k) += dhin(i,j,k);
 
   try 
   {
-    for (int i=0; i<fhin.nz(); i++)
-      for (int k=0; k<fhin.nx(); k++)
-	if (fhin(i,0,k) != fhout(i,0,k))
+    for (int i=0; i<dhin.nz(); i++)
+      for (int k=0; k<dhin.nx(); k++)
+	if (dhin(i,0,k) != dhout(i,0,k))
 	  throw Error3d(i,0,k); 
   }
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "reduceY failed!" << endl;
-    cout << "fhin ("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhin(i,j,k) << std::endl;
-    cout << "fhout("<< i << "," << j << "," << k << "):  "
-	<< setw(10) << fhout(i,j,k) << std::endl;
+    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhout(i,j,k) << std::endl;
   }
 }
 

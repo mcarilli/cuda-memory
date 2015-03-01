@@ -2,11 +2,11 @@
 #include <cstdlib>
 #include <cuda_runtime.h>
 
-class FloatHolder;
+template<class T> class DataHolder;
 
-class KernelLauncher 
+template<class T> class KernelLauncher 
 {
-  static KernelLauncher kl;
+  static KernelLauncher<T> kl;
   KernelLauncher();
   ~KernelLauncher();
   KernelLauncher& operator=(KernelLauncher&); 
@@ -14,17 +14,17 @@ class KernelLauncher
   cudaEvent_t start, stop;
 
   inline void startTiming();
-  inline void finishTiming(const char* kernelName, int totalElements);
+  inline void finishTiming(const char* kernelName, DataHolder<T>& dh);
 
   public:
-  static KernelLauncher& instance() { return kl; }
-  void copy(FloatHolder& fhin, FloatHolder& fhout);
-  void saxpy(FloatHolder& fhx, FloatHolder& fhy, float a);
-  void transposeNaive(FloatHolder& fhin, FloatHolder& fhout);
-  void transposeFast(FloatHolder& fhin, FloatHolder& fhout);
-  void transposeFastNoBankConf(FloatHolder& fhin, FloatHolder& fhout);
-  void transpose32PerThread(FloatHolder& fhin, FloatHolder& fhout);
-  void matxmatNaive(FloatHolder& fha, FloatHolder& fhb, FloatHolder& fhout);
-  void matxmatTiles(FloatHolder& fha, FloatHolder& fhb, FloatHolder& fhout);
-  void reduceY(FloatHolder& fhin, FloatHolder& fhout);
+  static KernelLauncher<T>& instance() { return kl; }
+  void copy(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void saxpy(DataHolder<T>& dhx, DataHolder<T>& dhy, T a);
+  void transposeNaive(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void transposeFast(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void transposeFastNoBankConf(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void transpose32PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void matxmatNaive(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
+  void matxmatTiles(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
+  void reduceY(DataHolder<T>& dhin, DataHolder<T>& dhout);
 };
