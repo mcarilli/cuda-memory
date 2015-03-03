@@ -28,6 +28,7 @@
 //       << dhin.totalElements*sizeof(float)/ms/1e6 << " GB/s\n"; \
 // } while(0) 
 
+// Initialize static data member
 template<class T> KernelLauncher<T> KernelLauncher<T>::kl;
 
 template<class T> KernelLauncher<T>::KernelLauncher()
@@ -439,6 +440,12 @@ template<class T> void KernelLauncher<T>::reduceY(DataHolder<T>& dhin
   finishTiming("reduceYBy2Kernel", dhin);
 }
 
+template<class T> void KernelLauncher<T>::parallelPrefixSum(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
+{
+startTiming();
+finishTiming("parallelPrefixSumKernel", dhin);
+}
 
 // Force instantiation of KernelLauncher<> for datatype selected in datatype.h
 template class KernelLauncher<datatype>;

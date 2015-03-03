@@ -28,7 +28,7 @@ template<class T> void runTesttransposeFastNoBankConf();
 template<class T> void runTestmatxmatNaive();
 template<class T> void runTestmatxmatTiles();
 template<class T> void runTestreduceY();
-
+template<class T> void runTestparallelPrefixSum();
 
 int main()
 {
@@ -49,6 +49,8 @@ int main()
   runTestmatxmatTiles<datatype>();
   cout << endl;
   runTestreduceY<datatype>();
+  cout << endl;
+  runTestparallelPrefixSum<datatype>();
   cout << endl;
 
   return 0;
@@ -466,11 +468,64 @@ template<class T> void runTestreduceY()
   {
     int i(error.i), j(error.j), k(error.k);
     cout << "reduceY failed!" << endl;
-    cout << "dhin ("<< i << "," << j << "," << k << "):  "
+    cout << "dhin("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << dhin(i,j,k) << std::endl;
     cout << "dhout("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << dhout(i,j,k) << std::endl;
   }
 }
 
+template<class T> void runTestparallelPrefixSum()
+{  
+  cout << "Testing parallelPrefixSum" << std::endl;
 
+  int Nx = MATDIMX*MATDIMY;
+  DataHolder<T> dhin(Nx);
+  DataHolder<T> dhout(Nx);
+  KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
+
+  {
+    int indx = 0;
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
+	{
+	  dhin(i,j,k) = rand()%2;  // Warning:  try big numbers here and you will
+	  dhout(i,j,k) = 0;        // exceed floating-point precision!
+	  indx++;
+	}
+  }
+
+  dhin.copyCPUtoGPU();
+
+  kernelLauncher.parallelPrefixSum(dhin, dhout);
+
+  dhout.copyGPUtoCPU();
+  
+  unsigned int sum = 0;
+  for (int i=0; i<dhin.nz(); i++)
+    for (int j=0; j<dhin.ny(); j++)
+      for (int k=0; k<dhin.nx(); k++)
+      {
+	  dhin(i,j,k) += sum;
+          sum += dhin(i,j,k);
+      }
+
+  try 
+  {
+    for (int i=0; i<dhin.nz(); i++)
+      for (int j=0; j<dhin.ny(); j++)
+	for (int k=0; k<dhin.nx(); k++)
+	  if (dhin(i,j,k) != dhout(i,j,k))
+	    throw Error3d(i,j,k); 
+  }
+  catch(Error3d& error)
+  {
+    int i(error.i), j(error.j), k(error.k);
+    cout << "parallelPrefixSum failed!" << endl;
+    cout << "dhin("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhin(i,j,k) << std::endl;
+    cout << "dhout("<< i << "," << j << "," << k << "):  "
+	<< setw(10) << dhout(i,j,k) << std::endl;
+  }
+}

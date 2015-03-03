@@ -27,4 +27,5 @@ template<class T> class KernelLauncher
   void matxmatNaive(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
   void matxmatTiles(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
   void reduceY(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void parallelPrefixSum(DataHolder<T>& dhin, DataHolder<T>& dhout);
 };
