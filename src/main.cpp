@@ -8,8 +8,8 @@
 #include "DataHolder.h"
 #include "KernelLauncher.h"
 
-#define MATDIMX 64
-#define MATDIMY 64
+#define MATDIMX 128
+#define MATDIMY 128
 
 using namespace std;
 
@@ -28,7 +28,7 @@ template<class T> void runTesttransposeFastNoBankConf();
 template<class T> void runTestmatxmatNaive();
 template<class T> void runTestmatxmatTiles();
 template<class T> void runTestreduceY();
-template<class T> void runTestparallelPrefixSum();
+template<class T> void runTestscan();
 
 int main()
 {
@@ -50,7 +50,7 @@ int main()
   cout << endl;
   runTestreduceY<datatype>();
   cout << endl;
-  runTestparallelPrefixSum<datatype>();
+  runTestscan<datatype>();
   cout << endl;
 
   return 0;
@@ -475,13 +475,13 @@ template<class T> void runTestreduceY()
   }
 }
 
-template<class T> void runTestparallelPrefixSum()
+template<class T> void runTestscan()
 {  
-  cout << "Testing parallelPrefixSum" << std::endl;
+  cout << "Testing scan" << std::endl;
 
-  int Nx = MATDIMX*MATDIMY;
-  DataHolder<T> dhin(Nx);
-  DataHolder<T> dhout(Nx);
+  int Nx = MATDIMX;
+  DataHolder<T> dhin(Nx,1);
+  DataHolder<T> dhout(Nx,1);
   KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
   {
@@ -498,7 +498,7 @@ template<class T> void runTestparallelPrefixSum()
 
   dhin.copyCPUtoGPU();
 
-  kernelLauncher.parallelPrefixSum(dhin, dhout);
+  kernelLauncher.scan(dhin, dhout);
 
   dhout.copyGPUtoCPU();
   
@@ -507,8 +507,9 @@ template<class T> void runTestparallelPrefixSum()
     for (int j=0; j<dhin.ny(); j++)
       for (int k=0; k<dhin.nx(); k++)
       {
-	  dhin(i,j,k) += sum;
-          sum += dhin(i,j,k);
+          int tmp = dhin(i,j,k);
+	  dhin(i,j,k) = sum;
+          sum += tmp;
       }
 
   try 
@@ -522,7 +523,7 @@ template<class T> void runTestparallelPrefixSum()
   catch(Error3d& error)
   {
     int i(error.i), j(error.j), k(error.k);
-    cout << "parallelPrefixSum failed!" << endl;
+    cout << "scan failed!" << endl;
     cout << "dhin("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << dhin(i,j,k) << std::endl;
     cout << "dhout("<< i << "," << j << "," << k << "):  "

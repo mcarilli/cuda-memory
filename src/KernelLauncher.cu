@@ -51,7 +51,10 @@ template<class T> void KernelLauncher<T>::startTiming()
 template<class T> void KernelLauncher<T>::finishTiming(const char* kernelName, DataHolder<T>& dh)
 {
   cudaEventRecord(stop); 
-  cudaEventSynchronize(stop); 
+
+  if ( cudaEventSynchronize(stop) != cudaSuccess )
+    std::cout << "After " << kernelName << ":  " << cudaGetErrorString(cudaGetLastError()) << "\n"; 
+
   float ms = 0; 
   cudaEventElapsedTime(&ms, start, stop); 
   std::cout << "sizeof(datatype):  " << sizeof(T) << "\n"; 
@@ -276,6 +279,63 @@ reduceYBy2Kernel(int nx
   }
 }
 
+
+// Based on https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html
+#define PADDED(n) (n+(n>>5)) // 32 smem banks; n>>5 = n/32 
+                             // Add one bank of padding between every 32 stored elements,
+                             // as for the 2D smem access patterns above.
+template<class T> __global__ void
+scan1BlockKernel(int nx
+    , T* in
+    , T* out)
+{
+  extern __shared__ T scratch[];
+  int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
+
+  // Load data from gmem.  Reads are coalesced.
+  scratch[PADDED(globalxindx)] = in[globalxindx];
+  scratch[PADDED(globalxindx+blockDim.x)] = in[globalxindx+blockDim.x];
+  
+  // Perform binary tree-style reduction into rightmost element of array
+  int offset = 1;
+  for (int activeThreads=nx>>1; activeThreads>0; activeThreads>>=1)
+  {
+    __syncthreads();
+
+    if (globalxindx < activeThreads)
+    {
+      int src = offset*(2*globalxindx+1)-1; // dst-offset
+      int dst = offset*(2*globalxindx+2)-1; // 2*offset*(globalxindx+1)-1  
+      scratch[PADDED(dst)] += scratch[PADDED(src)]; 
+    }
+    offset <<= 1;
+  }
+
+  // Zero the last element
+  if (globalxindx == 0)
+    scratch[PADDED(nx-1)] = 0;
+ 
+  // Perform tree-style down-sweep
+  for (int activeThreads=1; activeThreads<nx; activeThreads<<=1)
+  {
+    offset >>= 1;
+    __syncthreads();
+    if (globalxindx < activeThreads)
+    {
+      int left = offset*(2*globalxindx+1)-1;
+      int right = offset*(2*globalxindx+2)-1;
+      T temp = scratch[PADDED(left)];
+      scratch[PADDED(left)] = scratch[PADDED(right)];
+      scratch[PADDED(right)] += temp; 
+    } 
+  }
+
+  // Make sure all threads have the same view of memory.
+  __syncthreads();
+  out[globalxindx] = scratch[PADDED(globalxindx)];
+  out[globalxindx+blockDim.x] = scratch[PADDED(globalxindx+blockDim.x)];
+}
+
 // Wrapper functions exposed by KernelLauncher<T>
 
 template<class T> void KernelLauncher<T>::copy(DataHolder<T>& dhin
@@ -429,9 +489,9 @@ template<class T> void KernelLauncher<T>::reduceY(DataHolder<T>& dhin
       reduceYBy2Kernel
 	  <<<dim3((dhout.nx()+BLOCKDIMX-1)/BLOCKDIMX,(nyRemaining+2*BLOCKDIMY-1)/(2*BLOCKDIMY)), dim3(BLOCKDIMX,BLOCKDIMY)>>>
 	  (dhout.nx()
-	   , dhout.ny()
-           , yStride
-	   , dhout.rawPtrGPU);
+	  , dhout.ny()
+          , yStride
+	  , dhout.rawPtrGPU);
       pass++;
       yStride *= 2; 
       nyRemaining /= 2;
@@ -440,11 +500,16 @@ template<class T> void KernelLauncher<T>::reduceY(DataHolder<T>& dhin
   finishTiming("reduceYBy2Kernel", dhin);
 }
 
-template<class T> void KernelLauncher<T>::parallelPrefixSum(DataHolder<T>& dhin
+template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
     , DataHolder<T>& dhout)
 {
-startTiming();
-finishTiming("parallelPrefixSumKernel", dhin);
+  startTiming(); 
+  scan1BlockKernel
+      <<<1, (dhin.nx()>>1), (PADDED(dhin.nx())+1)*sizeof(T)>>>
+      (dhin.nx()
+      , dhin.rawPtrGPU
+      , dhout.rawPtrGPU);
+  finishTiming("scanKernel", dhin);
 }
 
 // Force instantiation of KernelLauncher<> for datatype selected in datatype.h
