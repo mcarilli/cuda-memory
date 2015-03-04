@@ -4,12 +4,10 @@
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
-#include "datatype.h"
+#include <vector>
+#include "global.h"
 #include "DataHolder.h"
 #include "KernelLauncher.h"
-
-#define MATDIMX 1024
-#define MATDIMY 1024
 
 using namespace std;
 
@@ -372,16 +370,6 @@ template<class T> void runTestmatxmatTiles()
 	dhb(i,k,j) = dha(i,j,k);
       }
 
-
-  for (int i=0; i<dhout.nz(); i++)
-    for (int j=0; j<dhout.ny(); j++)
-      for (int k=0; k<dhout.nx(); k++)
-      {
-	dhout(i,j,k) = 0;
-	dhsoln(i,j,k) = 0;
-      }
-
-
   dha.copyCPUtoGPU();
   dhb.copyCPUtoGPU();
 
@@ -430,8 +418,7 @@ template<class T> void runTestreduceY()
       for (int j=0; j<dhin.ny(); j++)
 	for (int k=0; k<dhin.nx(); k++)
 	{
-	  dhin(i,j,k) = 1;  // Warning:  try big numbers here and you will
-	  dhout(i,j,k) = 0; // exceed floating-point precision!
+	  dhin(i,j,k) = 1;  // Warning:  try big numbers here and you will exceed floating-point precision!
 	  indx++;
 	}
   }
@@ -465,26 +452,35 @@ template<class T> void runTestreduceY()
   }
 }
 
+#define PADTOSBDIM(n) (SCANBLOCKDIM*((n+SCANBLOCKDIM-1)/SCANBLOCKDIM))
 template<class T> void runTestscan()
 {  
   cout << "Testing scan" << std::endl;
 
   int Nx = MATDIMX;
-  DataHolder<T> dhin(Nx,1);
-  DataHolder<T> dhout(Nx,1);
+  int recursionDepth = 1;
+  // Make sure allocated mem is padded to a multiple of SCANBLOCKDIM.
+  DataHolder<T> dhin(PADTOSBDIM(Nx));
+  DataHolder<T> dhout(PADTOSBDIM(Nx));
   KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
+  cout << PADTOSBDIM(Nx) << endl;
+
+  // Allocate memory for sums.
+  vector<DataHolder<T>*> sums;
+  for (int n=dhin.nx()/SCANBLOCKDIM; n>0; n/=SCANBLOCKDIM)
   {
-    int indx = 0;
-    for (int i=0; i<dhin.nz(); i++)
-      for (int j=0; j<dhin.ny(); j++)
-	for (int k=0; k<dhin.nx(); k++)
-	{
-	  dhin(i,j,k) = rand()%2;  // Warning:  try big numbers here and you will
-	  dhout(i,j,k) = 0;        // exceed floating-point precision!
-	  indx++;
-	}
+     // Make sure sums arrays are padded to a multiple of block size.
+     sums.push_back(new DataHolder<T>(PADTOSBDIM(n)));
+     recursionDepth++;
   }
+
+  for (int i=0; i<dhin.nz(); i++)
+    for (int j=0; j<dhin.ny(); j++)
+      for (int k=0; k<dhin.nx(); k++)
+      {
+	dhin(i,j,k) = rand()%2;  // Warning:  try big numbers here and you will exceed floating-point precision!
+      }
 
   dhin.copyCPUtoGPU();
 
@@ -519,4 +515,7 @@ template<class T> void runTestscan()
     cout << "dhout("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << dhout(i,j,k) << std::endl;
   }
+
+  for (int i=0; i<sums.size(); i++)
+    delete sums[i];  
 }

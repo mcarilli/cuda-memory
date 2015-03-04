@@ -1,4 +1,4 @@
-#include "datatype.h"
+#include "global.h"
 #include "DataHolder.h"
 
 template<class T> DataHolder<T>::DataHolder(int nx, int ny/*=1*/, int nz/*=1*/) : 
@@ -9,6 +9,10 @@ template<class T> DataHolder<T>::DataHolder(int nx, int ny/*=1*/, int nz/*=1*/) 
 {
   rawPtrCPU = new T[totalElements];
   gpuErrorCheck(cudaMalloc(&rawPtrGPU, totalElements*sizeof(T))); 
+  // Make sure both initialized arrays are zeroed.
+  for (int i=0; i<totalElements; i++)
+    rawPtrCPU[i] = 0;
+  copyCPUtoGPU();
 }
 
 template<class T> DataHolder<T>::~DataHolder()

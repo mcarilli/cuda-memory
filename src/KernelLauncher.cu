@@ -1,18 +1,10 @@
 #include <cstdlib>
 #include <iostream>
 #include "KernelLauncher.h"
-#include "datatype.h"
+#include "global.h"
 #include "DataHolder.h"
 // #include "cuPrintf.cu"
 
-//For 1D kernels
-#define BLOCKDIM 1024
-// For 2D kernels, use 32x32 thread blocks = BLOCKDIM blocks/thread   
-// This is the maximum allowable number on my machine, and         
-// suffices for coalesced gmem reads.                             
-#define BLOCKDIMX 32
-#define BLOCKDIMY 32
- 
 #define NREPS 10
 
 // More trouble than it's worth.
@@ -285,7 +277,7 @@ reduceYBy2Kernel(int nx
                              // Add one bank of padding between every 32 stored elements,
                              // as for the 2D smem access patterns above.
 template<class T> __global__ void
-scan1BlockKernel(int nx
+scanWithinBlockKernel(int nx
     , T* in
     , T* out)
 {
@@ -504,7 +496,7 @@ template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
     , DataHolder<T>& dhout)
 {
   startTiming(); 
-  scan1BlockKernel
+  scanWithinBlockKernel
       <<<1, (dhin.nx()>>1), (PADDED(dhin.nx())+1)*sizeof(T)>>>
       (dhin.nx()
       , dhin.rawPtrGPU
