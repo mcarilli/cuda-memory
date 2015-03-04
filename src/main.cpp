@@ -8,8 +8,8 @@
 #include "DataHolder.h"
 #include "KernelLauncher.h"
 
-#define MATDIMX 128
-#define MATDIMY 128
+#define MATDIMX 1024
+#define MATDIMY 1024
 
 using namespace std;
 
@@ -306,27 +306,21 @@ template<class T> void runTestmatxmatNaive()
   DataHolder<T> dhsoln(Ny,Ny);
   KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
-  {
-    int indx = 0;
-    for (int i=0; i<dha.nz(); i++)
-      for (int j=0; j<dha.ny(); j++)
-	for (int k=0; k<dha.nx(); k++)
-	{
-	  dha(i,j,k) = indx;
-          dhb(i,k,j) = indx;
-	  indx++;
-	}
-  }
+  for (int i=0; i<dha.nz(); i++)
+    for (int j=0; j<dha.ny(); j++)
+      for (int k=0; k<dha.nx(); k++)
+      {
+	dha(i,j,k) = rand()%50;
+	dhb(i,k,j) = dha(i,j,k);
+      }
 
-  {
-    for (int i=0; i<dhout.nz(); i++)
-      for (int j=0; j<dhout.ny(); j++)
-	for (int k=0; k<dhout.nx(); k++)
-	{
-	  dhout(i,j,k) = 0;
-	  dhsoln(i,j,k) = 0;
-	}
-  }
+  for (int i=0; i<dhout.nz(); i++)
+    for (int j=0; j<dhout.ny(); j++)
+      for (int k=0; k<dhout.nx(); k++)
+      {
+	dhout(i,j,k) = 0;
+	dhsoln(i,j,k) = 0;
+      }
 
   dha.copyCPUtoGPU();
   dhb.copyCPUtoGPU();
@@ -370,27 +364,23 @@ template<class T> void runTestmatxmatTiles()
   DataHolder<T> dhsoln(Ny,Ny);
   KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
 
-  {
-    int indx = 0;
-    for (int i=0; i<dha.nz(); i++)
-      for (int j=0; j<dha.ny(); j++)
-	for (int k=0; k<dha.nx(); k++)
-	{
-	  dha(i,j,k) = indx;
-          dhb(i,k,j) = indx;
-	  indx++;
-	}
-  }
+  for (int i=0; i<dha.nz(); i++)
+    for (int j=0; j<dha.ny(); j++)
+      for (int k=0; k<dha.nx(); k++)
+      {
+	dha(i,j,k) = rand()%50;
+	dhb(i,k,j) = dha(i,j,k);
+      }
 
-  {
-    for (int i=0; i<dhout.nz(); i++)
-      for (int j=0; j<dhout.ny(); j++)
-	for (int k=0; k<dhout.nx(); k++)
-	{
-	  dhout(i,j,k) = 0;
-	  dhsoln(i,j,k) = 0;
-	}
-  }
+
+  for (int i=0; i<dhout.nz(); i++)
+    for (int j=0; j<dhout.ny(); j++)
+      for (int k=0; k<dhout.nx(); k++)
+      {
+	dhout(i,j,k) = 0;
+	dhsoln(i,j,k) = 0;
+      }
+
 
   dha.copyCPUtoGPU();
   dhb.copyCPUtoGPU();
