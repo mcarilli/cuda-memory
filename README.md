@@ -20,3 +20,5 @@ matxmatNaive -- Naive matrix multiply.  Each thread handles one element of outpu
 matxmatTiles -- Matrix multiply using shared memory tiles to reduce total number of gmem accesses and ensure that all gmem accesses are coalesced.  Smem bank conflicts are also eliminated.
 
 reduceY -- Reduces (sums) columns of matrix into top row.
+
+scan -- Parallel prefix sum based on GPU Gems 3 ch. 39. 
