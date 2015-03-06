@@ -21,4 +21,4 @@ matxmatTiles -- Matrix multiply using shared memory tiles to reduce total number
 
 reduceY -- Reduces (sums) columns of matrix into top row.
 
-scan -- Parallel prefix sum based on GPU Gems 3 ch. 39.  Scans input array within blocks, stores their sums, recursively scans array of sums, then adds each element of the scanned sums array to all elements in the appropriate region of the output array. 
+scan -- Parallel prefix sum capable of handling arbitrarily large data arrays, based on GPU Gems 3 ch. 39.  Scans input array within blocks, stores their sums, recursively scans array of sums, then adds elements of the scanned sums array to appropriate regions of the output array. 
