@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 #include "KernelLauncher.h"
 #include "global.h"
 #include "DataHolder.h"
@@ -20,11 +21,18 @@
 //       << dhin.totalElements*sizeof(float)/ms/1e6 << " GB/s\n"; \
 // } while(0) 
 
-// Initialize static data member
+// Initialize static data members
 template<class T> KernelLauncher<T> KernelLauncher<T>::kl;
 
 template<class T> KernelLauncher<T>::KernelLauncher()
 {
+  int device;
+  cudaGetDevice(&device);
+  cudaGetDeviceProperties(&deviceProperties,device);
+  maxBlocks[0] = deviceProperties.maxGridSize[0];
+  maxBlocks[1] = deviceProperties.maxGridSize[1];
+  maxBlocks[2] = deviceProperties.maxGridSize[2];
+  std::cout << "device:  " << device << std::endl;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 }
@@ -220,7 +228,7 @@ matxmatTilesKernel(int nx
 
     __syncthreads();
 
-    #pragma unroll // Unrolling could be useful here because BLOCKDIMX known at compile time
+    // #pragma unroll // Unrolling potentially useful here because BLOCKDIMX known at compile time
     for (int x=0; x<BLOCKDIMX; x++)
       if(inRange)
 	sumOut += tileA[threadIdx.y][x]*tileB[x][threadIdx.x];      
@@ -277,57 +285,132 @@ reduceYBy2Kernel(int nx
                              // Add one bank of padding between every 32 stored elements,
                              // as for the 2D smem access patterns above.
 template<class T> __global__ void
-scanWithinBlockKernel(int nx
+scanWithinBlocksKernel(int nx
+    , int ngrids
     , T* in
-    , T* out)
+    , T* out
+    , T* sum)
 {
   extern __shared__ T scratch[];
-  int globalxindx = blockIdx.x*blockDim.x + threadIdx.x;
-
-  // Load data from gmem.  Reads are coalesced.
-  scratch[PADDED(globalxindx)] = in[globalxindx];
-  scratch[PADDED(globalxindx+blockDim.x)] = in[globalxindx+blockDim.x];
-  
-  // Perform binary tree-style reduction into rightmost element of array
-  int offset = 1;
-  for (int activeThreads=nx>>1; activeThreads>0; activeThreads>>=1)
+  // Each block scans over 2*blockDim.x elements
+  // Gmem arrays are padded to SCANSECTION = 2*blockDim.x
+  for (int grid = 0; grid < ngrids; grid++)
   {
-    __syncthreads();
+    int globalxindx = 2*blockIdx.x*blockDim.x + threadIdx.x + grid*blockDim.x*gridDim.x;
 
-    if (globalxindx < activeThreads)
+    // Load data from gmem.  Reads are coalesced.
+    scratch[PADDED(threadIdx.x)] = in[globalxindx];
+    scratch[PADDED(threadIdx.x+blockDim.x)] = in[globalxindx+blockDim.x];
+    
+    // Perform binary tree-style reduction into rightmost element of array
+    int offset = 1;
+    for (int activeThreads = blockDim.x; activeThreads > 0; activeThreads >>= 1)
     {
-      int src = offset*(2*globalxindx+1)-1; // dst-offset
-      int dst = offset*(2*globalxindx+2)-1; // 2*offset*(globalxindx+1)-1  
-      scratch[PADDED(dst)] += scratch[PADDED(src)]; 
+      __syncthreads();
+
+      if (threadIdx.x < activeThreads)
+      {
+	int src = offset*(2*threadIdx.x+1)-1; // dst-offset
+	int dst = offset*(2*threadIdx.x+2)-1; // 2*offset*(threadIdx.x+1)-1 
+	scratch[PADDED(dst)] += scratch[PADDED(src)]; 
+      }
+      offset <<= 1;
     }
-    offset <<= 1;
-  }
 
-  // Zero the last element
-  if (globalxindx == 0)
-    scratch[PADDED(nx-1)] = 0;
- 
-  // Perform tree-style down-sweep
-  for (int activeThreads=1; activeThreads<nx; activeThreads<<=1)
-  {
-    offset >>= 1;
+    // Make sure all threads have same view of memory
+    // (have flushed writes to smem)
     __syncthreads();
-    if (globalxindx < activeThreads)
-    {
-      int left = offset*(2*globalxindx+1)-1;
-      int right = offset*(2*globalxindx+2)-1;
-      T temp = scratch[PADDED(left)];
-      scratch[PADDED(left)] = scratch[PADDED(right)];
-      scratch[PADDED(right)] += temp; 
-    } 
-  }
 
-  // Make sure all threads have the same view of memory.
-  __syncthreads();
-  out[globalxindx] = scratch[PADDED(globalxindx)];
-  out[globalxindx+blockDim.x] = scratch[PADDED(globalxindx+blockDim.x)];
+    // Store total sum of this scan section
+    // (to be added to later sections) 
+    if (threadIdx.x == 0)
+    {
+      sum[blockIdx.x+grid*gridDim.x] = scratch[PADDED(SCANSECTION-1)];
+    }   
+ 
+    // Zero the last element
+    if (threadIdx.x == 0)
+      scratch[PADDED(SCANSECTION-1)] = 0;
+   
+    // Perform tree-style down-sweep, moving sums one index to the right
+    for (int activeThreads = 1; activeThreads < SCANSECTION; activeThreads <<= 1)
+    {
+      offset >>= 1;
+      __syncthreads();
+      if (threadIdx.x < activeThreads)
+      {
+	int left = offset*(2*threadIdx.x+1)-1;
+	int right = offset*(2*threadIdx.x+2)-1;
+	T temp = scratch[PADDED(left)];
+	scratch[PADDED(left)] = scratch[PADDED(right)];
+	scratch[PADDED(right)] += temp; 
+      } 
+    }
+
+    // Make sure all threads have flushed their writes to smem
+    __syncthreads();
+
+    // Output data to gmem
+    out[globalxindx] = scratch[PADDED(threadIdx.x)];
+    out[globalxindx+blockDim.x] = scratch[PADDED(threadIdx.x+blockDim.x)];
+  }
 }
 
+
+template<class T> __global__ void
+scanApplySum(int nx
+    , int ngrids
+    , T* __restrict__ out
+    , const T* __restrict__ sum) // Enable use of constant cache for sum
+{
+  for (int grid = 0; grid < ngrids; grid++)
+  {
+    int globalxindx = 2*blockIdx.x*blockDim.x + threadIdx.x + grid*blockDim.x*gridDim.x;
+    out[globalxindx] += sum[blockIdx.x];
+    out[globalxindx+blockDim.x] += sum[blockIdx.x];
+  }
+}
+
+// The sums array needs to be built up recursively from 1 block.
+template<class T> void scanRecursive(unsigned int nx
+    , unsigned int maxBlocks
+    , int currentDepth
+    , T* in
+    , T* out
+    , std::vector<T*> sums
+    , std::vector<T*> sumsOut)
+{
+
+  // nx should be a multiple of SCANSECTION.
+  unsigned int ngrids = (nx/SCANSECTION+maxBlocks-1)/maxBlocks;
+  scanWithinBlocksKernel
+     <<<(nx/SCANSECTION>maxBlocks)?maxBlocks:nx/SCANSECTION, SCANSECTION>>1, (PADDED(SCANSECTION)+1)*sizeof(T)>>>
+      (nx
+      , ngrids
+      , in
+      , out
+      , sums[currentDepth]);
+
+  if ( nx <= SCANSECTION)
+    return;
+  
+  std::cout << "PADTOSECDIM(nx/SCANSECTION) = " << PADTOSECDIM(nx/SCANSECTION) << std::endl;
+
+  scanRecursive(PADTOSECDIM(nx/SCANSECTION)
+      , maxBlocks
+      , currentDepth+1
+      , sums[currentDepth]
+      , sumsOut[currentDepth]
+      , sums
+      , sumsOut);
+
+  scanApplySum
+    <<<(nx/SCANSECTION>maxBlocks)?maxBlocks:nx/SCANSECTION, SCANSECTION>>1, (PADDED(SCANSECTION)+1)*sizeof(T)>>>
+    (nx
+    , ngrids
+    , out
+    , sumsOut[currentDepth]);
+}
 // Wrapper functions exposed by KernelLauncher<T>
 
 template<class T> void KernelLauncher<T>::copy(DataHolder<T>& dhin
@@ -495,13 +578,49 @@ template<class T> void KernelLauncher<T>::reduceY(DataHolder<T>& dhin
 template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
     , DataHolder<T>& dhout)
 {
-  startTiming(); 
-  scanWithinBlockKernel
-      <<<1, (dhin.nx()>>1), (PADDED(dhin.nx())+1)*sizeof(T)>>>
-      (dhin.nx()
-      , dhin.rawPtrGPU
-      , dhout.rawPtrGPU);
+  // Allocate memory for sums.  I don't consider the allocation as part of the timing test. 
+  std::vector<DataHolder<T>*> sumsVec;
+  std::vector<DataHolder<T>*> sumsOutVec;
+
+  int n=dhin.nx()/SCANSECTION;
+
+  while (n>1)
+  {
+     std::cout << "n = " << n << std::endl;
+     // Sums arrays are padded to a multiple of block size.
+     sumsVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));
+     sumsOutVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));
+     n = DIVUP(n,SCANSECTION);
+  }
+
+  // Always allocate at least one sums array.
+  sumsVec.push_back(new DataHolder<T>(PADTOSECDIM(1)));
+  sumsOutVec.push_back(new DataHolder<T>(PADTOSECDIM(1)));
+
+  std::vector<T*> sums(sumsVec.size());
+  std::vector<T*> sumsOut(sumsOutVec.size());
+
+  for (int n=0; n<sumsVec.size(); n++)
+  {
+    sums[n] = sumsVec[n]->rawPtrGPU;
+    sumsOut[n] = sumsOutVec[n]->rawPtrGPU;
+  }
+
+  startTiming();
+  scanRecursive(dhin.nx() /* int nx */
+    , maxBlocks[0] /* int maxBlocks */
+    , 0 /* int currentDepth */
+    , dhin.rawPtrGPU /* T* in */
+    , dhout.rawPtrGPU /* T* out */
+    , sums /* std::vector<T*> sums */
+    , sumsOut /* std::vector<T*> sumsOut */); 
   finishTiming("scanKernel", dhin);
+
+  for (int i=0; i<sumsVec.size(); i++)
+  {
+    delete sumsVec[i];
+    delete sumsOutVec[i];
+  }
 }
 
 // Force instantiation of KernelLauncher<> for datatype selected in datatype.h

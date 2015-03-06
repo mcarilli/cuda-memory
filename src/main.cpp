@@ -4,7 +4,6 @@
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
-#include <vector>
 #include "global.h"
 #include "DataHolder.h"
 #include "KernelLauncher.h"
@@ -452,35 +451,20 @@ template<class T> void runTestreduceY()
   }
 }
 
-#define PADTOSBDIM(n) (SCANBLOCKDIM*((n+SCANBLOCKDIM-1)/SCANBLOCKDIM))
 template<class T> void runTestscan()
 {  
   cout << "Testing scan" << std::endl;
 
-  int Nx = MATDIMX;
-  int recursionDepth = 1;
-  // Make sure allocated mem is padded to a multiple of SCANBLOCKDIM.
-  DataHolder<T> dhin(PADTOSBDIM(Nx));
-  DataHolder<T> dhout(PADTOSBDIM(Nx));
+  int Nx = MATDIM;
+  // Make sure allocated mem is padded to a multiple of SCANSECTION.
+  DataHolder<T> dhin(PADTOSECDIM(Nx));
+  DataHolder<T> dhout(PADTOSECDIM(Nx));
   KernelLauncher<T>& kernelLauncher = KernelLauncher<T>::instance();
-
-  cout << PADTOSBDIM(Nx) << endl;
-
-  // Allocate memory for sums.
-  vector<DataHolder<T>*> sums;
-  for (int n=dhin.nx()/SCANBLOCKDIM; n>0; n/=SCANBLOCKDIM)
-  {
-     // Make sure sums arrays are padded to a multiple of block size.
-     sums.push_back(new DataHolder<T>(PADTOSBDIM(n)));
-     recursionDepth++;
-  }
 
   for (int i=0; i<dhin.nz(); i++)
     for (int j=0; j<dhin.ny(); j++)
       for (int k=0; k<dhin.nx(); k++)
-      {
 	dhin(i,j,k) = rand()%2;  // Warning:  try big numbers here and you will exceed floating-point precision!
-      }
 
   dhin.copyCPUtoGPU();
 
@@ -503,8 +487,10 @@ template<class T> void runTestscan()
     for (int i=0; i<dhin.nz(); i++)
       for (int j=0; j<dhin.ny(); j++)
 	for (int k=0; k<dhin.nx(); k++)
+        {
 	  if (dhin(i,j,k) != dhout(i,j,k))
 	    throw Error3d(i,j,k); 
+        }
   }
   catch(Error3d& error)
   {
@@ -515,7 +501,4 @@ template<class T> void runTestscan()
     cout << "dhout("<< i << "," << j << "," << k << "):  "
 	<< setw(10) << dhout(i,j,k) << std::endl;
   }
-
-  for (int i=0; i<sums.size(); i++)
-    delete sums[i];  
 }

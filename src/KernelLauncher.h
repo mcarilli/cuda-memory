@@ -7,6 +7,8 @@ template<class T> class DataHolder;
 template<class T> class KernelLauncher 
 {
   static KernelLauncher<T> kl;
+  cudaDeviceProp deviceProperties;
+  unsigned int maxBlocks[3];
   KernelLauncher();
   ~KernelLauncher();
   KernelLauncher& operator=(KernelLauncher&); 
