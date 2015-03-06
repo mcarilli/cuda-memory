@@ -380,6 +380,7 @@ template<class T> void scanRecursive(unsigned int nx
     , std::vector<T*> sums
     , std::vector<T*> sumsOut)
 {
+  std::cout << "nx at this level = PADTOSECDIM(nx/SCANSECTION) = " << nx << std::endl;
 
   // nx should be a multiple of SCANSECTION.
   unsigned int ngrids = (nx/SCANSECTION+maxBlocks-1)/maxBlocks;
@@ -393,8 +394,6 @@ template<class T> void scanRecursive(unsigned int nx
 
   if ( nx <= SCANSECTION)
     return;
-  
-  std::cout << "PADTOSECDIM(nx/SCANSECTION) = " << PADTOSECDIM(nx/SCANSECTION) << std::endl;
 
   scanRecursive(PADTOSECDIM(nx/SCANSECTION)
       , maxBlocks
@@ -586,7 +585,6 @@ template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
 
   while (n>1)
   {
-     std::cout << "n = " << n << std::endl;
      // Sums arrays are padded to a multiple of block size.
      sumsVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));
      sumsOutVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));

@@ -325,7 +325,10 @@ template<class T> void runTestmatxmatNaive()
   kernelLauncher.matxmatNaive(dha, dhb, dhout);
 
   dhout.copyGPUtoCPU();
-  
+
+  if ( MATDIMX >= 512 )
+    cout << "Warning: CPU version may take several seconds for 512x512 or higher" << endl; 
+ 
   try 
   {
     for (int i=0; i<dhout.nz(); i++)
@@ -375,6 +378,9 @@ template<class T> void runTestmatxmatTiles()
   kernelLauncher.matxmatTiles(dha, dhb, dhout);
 
   dhout.copyGPUtoCPU();
+
+  if ( MATDIMX >= 512 )
+    cout << "Warning: CPU version may take several seconds for 512x512 or higher" << endl;
   
   try 
   {
@@ -465,6 +471,9 @@ template<class T> void runTestscan()
     for (int j=0; j<dhin.ny(); j++)
       for (int k=0; k<dhin.nx(); k++)
 	dhin(i,j,k) = rand()%2;  // Warning:  try big numbers here and you will exceed floating-point precision!
+
+  if( MATDIM >= 1024*1024*128)
+    cout << "Big dogs gotta eat" << endl;
 
   dhin.copyCPUtoGPU();
 

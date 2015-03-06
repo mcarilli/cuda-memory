@@ -3,7 +3,7 @@ cuda-memory
 
 Playing around with GPU kernel optimization.
 
-Current Kernels:
+Current Functions:
 
 copy -- Simple copy as benchmark.
 
@@ -21,4 +21,4 @@ matxmatTiles -- Matrix multiply using shared memory tiles to reduce total number
 
 reduceY -- Reduces (sums) columns of matrix into top row.
 
-scan -- Parallel prefix sum based on GPU Gems 3 ch. 39. 
+scan -- Parallel prefix sum based on GPU Gems 3 ch. 39.  Scans input array within blocks, stores their sums, recursively scans array of sums, then adds each element of the scanned sums array to all elements in the appropriate region of the output array. 
