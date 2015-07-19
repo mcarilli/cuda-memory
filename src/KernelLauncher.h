@@ -25,9 +25,17 @@ template<class T> class KernelLauncher
   void transposeNaive(DataHolder<T>& dhin, DataHolder<T>& dhout);
   void transposeFast(DataHolder<T>& dhin, DataHolder<T>& dhout);
   void transposeFastNoBankConf(DataHolder<T>& dhin, DataHolder<T>& dhout);
-  void transpose32PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void transpose4PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout);
   void matxmatNaive(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
   void matxmatTiles(DataHolder<T>& dha, DataHolder<T>& dhb, DataHolder<T>& dhout);
   void reduceY(DataHolder<T>& dhin, DataHolder<T>& dhout);
   void scan(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void unrollForLatency1(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void unrollForLatency2(DataHolder<T>& dhin, DataHolder<T>& dhout);
+  void histogram(DataHolder<T>& dhin
+      , DataHolder<T> blockhist
+      , DataHolder<T> blockhistTranspose
+      , DataHolder<T> hist );
+  void bankconflicts();
 };
+

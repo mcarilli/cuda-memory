@@ -172,6 +172,44 @@ transposeFastNoBankConfKernel(int nx_in
         staging_out[threadIdx.y][threadIdx.x];
 }
 
+template<class T> __global__ void
+transpose4PerThreadKernel( int nx
+  , int ny
+  , const T* __restrict__ in
+  , T* __restrict__ out )
+{
+
+  __shared__ T smemtile[TILEDIM][TILEDIM+1];
+
+  int localx = threadIdx.x;
+  int localy = threadIdx.y;
+
+  int globalx = blockIdx.x*TILEDIM+threadIdx.x;
+  int globaly = blockIdx.y*TILEDIM+threadIdx.y;
+
+  #pragma unroll
+  for ( int localstep=0; localstep<TILEDIM; localstep += 8 )
+  {
+    int x = globalx;
+    int y = globaly+localstep;
+    if ( x<nx && y<ny )
+      smemtile[localy+localstep][localx] = in[y*nx+x];
+  }
+  __syncthreads();
+
+  globalx = localx+blockIdx.y*TILEDIM;
+  globaly = localy+blockIdx.x*TILEDIM;
+
+  #pragma unroll
+  for ( int localstep=0; localstep<TILEDIM; localstep += 8 )
+  {
+    int x = globalx;
+    int y = globaly+localstep;
+    if ( x<ny && y<nx )
+      out[y*ny+x] = smemtile[localx][localy+localstep];
+  }
+}
+
 template<class T> __global__ void 
 matxmatNaiveKernel(int nx
       , int ny
@@ -371,6 +409,75 @@ scanApplySum(int nx
   }
 }
 
+template<class T> __global__ void 
+unrollForLatency1Kernel( int nx
+    , int ny
+    , T* __restrict__ in
+    , T* __restrict__ out)
+{
+    int ix = blockIdx.x*blockDim.x*8+threadIdx.x;
+    // int iy = blockIdx.y*blockDim.x+threadIdx.y;
+    // int globalidx = iy*nx+ix;
+
+    // Assumes that nx is divisible by blockIdx.x*blockDim.x*8 
+    for ( int i = ix;
+        i < nx;
+        i += blockDim.x*gridDim.x*8 )
+    { 
+      T a = in[i];
+      T b = in[i+blockDim.x];
+      T c = in[i+2*blockDim.x];
+      T d = in[i+3*blockDim.x]; 
+      T e = in[i+4*blockDim.x]; 
+      T f = in[i+5*blockDim.x]; 
+      T g = in[i+6*blockDim.x];
+      T h = in[i+7*blockDim.x];
+      out[i] = a+b+c+d+e+f+g+h; 
+    }
+}
+
+template<class T> __global__ void
+unrollForLatency2Kernel( int nx
+    , int ny
+    , T* __restrict__ in
+    , T* __restrict__ out)
+{
+    int ix = blockIdx.x*blockDim.x*8+threadIdx.x;
+    // int iy = blockIdx.y*blockDim.x+threadIdx.y;
+    // int globalidx = iy*nx+ix;
+
+    for ( int i = ix;
+        i < nx;
+        i += blockDim.x*gridDim.x*8 )
+    {
+      T* ptr = in+i;
+      T tmp = 0;
+      for ( int inner = 0; inner < 8; inner++ )
+      {
+        tmp += *ptr;
+        ptr += blockDim.x;
+      }   
+      out[i] = tmp;
+    }
+}
+
+template<class T, int pad> __global__ void 
+bankconflictsKernel( T* out )
+{
+  __shared__ T smem[32][32+pad];
+
+  int ix = threadIdx.x;
+  int iy = threadIdx.y;
+ 
+  int globalidx = iy*blockDim.x + ix;
+
+  smem[iy][ix] = ix;
+  T test = smem[ix][iy];
+  __syncthreads(); 
+  out[globalidx] = test;  
+}
+
+
 // The sums array needs to be built up recursively from 1 block.
 template<class T> void scanRecursive(unsigned int nx
     , unsigned int maxBlocks
@@ -490,18 +597,17 @@ template<class T> void KernelLauncher<T>::transposeFastNoBankConf(DataHolder<T>&
   finishTiming("transposeFastNoBankConf", dhin);
 }
 
-template<class T> void KernelLauncher<T>::transpose32PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout)
+template<class T> void KernelLauncher<T>::transpose4PerThread(DataHolder<T>& dhin, DataHolder<T>& dhout)
 {
-  printf("Currently just runs transposeFast.  To be done later...");
   startTiming();
   // for (int rep=0; rep<NREPS; rep++)
-    transposeFastKernel
-	<<<dim3((dhin.nx()+BLOCKDIMX-1)/BLOCKDIMX,(dhin.ny()+BLOCKDIMY-1)/BLOCKDIMY), dim3(BLOCKDIMX,BLOCKDIMY)>>>
+    transpose4PerThreadKernel
+	<<<dim3((dhin.nx()+TILEDIM-1)/TILEDIM,(dhin.ny()+TILEDIM-1)/TILEDIM), dim3(TILEDIM,8)>>>
 	(dhin.nx()
 	, dhin.ny()
 	, dhin.rawPtrGPU
 	, dhout.rawPtrGPU);
-  finishTiming("transpose32PerThread", dhin);
+  finishTiming("transpose4PerThread", dhin);
 }
 
 template<class T> void KernelLauncher<T>::matxmatNaive(DataHolder<T>& dha
@@ -585,7 +691,7 @@ template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
 
   while (n>1)
   {
-     // Sums arrays are padded to a multiple of block size.
+     // Sums arrays are padded to a multiple of scan section.
      sumsVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));
      sumsOutVec.push_back(new DataHolder<T>(PADTOSECDIM(n)));
      n = DIVUP(n,SCANSECTION);
@@ -621,6 +727,75 @@ template<class T> void KernelLauncher<T>::scan(DataHolder<T>& dhin
   }
 }
 
+template<class T> void KernelLauncher<T>::unrollForLatency1(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
+{
+  startTiming();
+  dim3 block(128,1);
+  dim3 grid(128, 1);
+  unrollForLatency1Kernel
+      <<<grid, block>>>
+      (dhin.nx()
+      , dhin.ny()
+      , dhin.rawPtrGPU
+      , dhout.rawPtrGPU);
+  finishTiming("unrollForLatency1", dhin);
+}
+
+template<class T> void KernelLauncher<T>::unrollForLatency2(DataHolder<T>& dhin
+    , DataHolder<T>& dhout)
+{
+  startTiming();
+  dim3 block(128, 1);
+  dim3 grid(128, 1);
+  unrollForLatency2Kernel
+      <<<grid, block>>>
+      (dhin.nx()
+      , dhin.ny()
+      , dhin.rawPtrGPU
+      , dhout.rawPtrGPU);
+  finishTiming("unrollForLatency2", dhin);
+}
+
+template<class T> void KernelLauncher<T>::bankconflicts() 
+{
+  cudaSharedMemConfig config;
+  cudaDeviceGetSharedMemConfig( &config );
+  if( config == cudaSharedMemBankSizeFourByte )
+    std::cout << "Default is four-byte mode" << std::endl;
+  else
+    std::cout << "Default is eight-byte mode" << std::endl;
+
+  DataHolder<float> dhfloat( 32, 32);
+  DataHolder<double> dhdouble( 32, 32 );
+
+  dim3 block( 32, 32 );
+  dim3 grid( 1, 1 );
+
+  cudaDeviceSetSharedMemConfig( cudaSharedMemBankSizeFourByte );
+
+  bankconflictsKernel<float, 0><<<grid, block>>>( dhfloat.rawPtrGPU );
+  bankconflictsKernel<double, 0><<<grid, block>>>( dhdouble.rawPtrGPU );
+  bankconflictsKernel<float, 1><<<grid, block>>>( dhfloat.rawPtrGPU ); 
+  bankconflictsKernel<double, 1><<<grid, block>>>( dhdouble.rawPtrGPU ); 
+  bankconflictsKernel<float, 2><<<grid, block>>>( dhfloat.rawPtrGPU ); 
+  bankconflictsKernel<double, 2><<<grid, block>>>( dhdouble.rawPtrGPU ); 
+
+  cudaDeviceSetSharedMemConfig( cudaSharedMemBankSizeEightByte );
+
+  bankconflictsKernel<float, 0><<<grid, block>>>( dhfloat.rawPtrGPU );
+  bankconflictsKernel<double, 0><<<grid, block>>>( dhdouble.rawPtrGPU );
+  bankconflictsKernel<float, 1><<<grid, block>>>( dhfloat.rawPtrGPU );
+  bankconflictsKernel<double, 1><<<grid, block>>>( dhdouble.rawPtrGPU );
+  bankconflictsKernel<float, 2><<<grid, block>>>( dhfloat.rawPtrGPU );
+  bankconflictsKernel<double, 2><<<grid, block>>>( dhdouble.rawPtrGPU );
+
+  cudaDeviceSetSharedMemConfig( cudaSharedMemBankSizeDefault );
+}
+
+
+
+
+
 // Force instantiation of KernelLauncher<> for datatype selected in datatype.h
 template class KernelLauncher<datatype>;
-

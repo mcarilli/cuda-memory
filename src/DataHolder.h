@@ -7,6 +7,8 @@ template<class T> class KernelLauncher;
 
 template<class T> class DataHolder
 {
+  static int allocationCounter;
+
   dim3 nElements;
   int totalElements;
   T *rawPtrCPU, *rawPtrGPU;
@@ -35,5 +37,5 @@ template<class T> class DataHolder
   int ny() { return nElements.y; }
   int nz() { return nElements.z; }
  
-  friend class KernelLauncher<T>;
+  template<class U> friend class KernelLauncher;
 };
